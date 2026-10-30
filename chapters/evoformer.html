@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>04 Evoformer · FoldBook</title>
+<link rel="stylesheet" href="../css/style.css">
+<link rel="icon" href="../favicon.svg">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+<script src="../js/common.js" defer></script>
+<script src="../js/ch4.js" defer></script>
+</head>
+<body>
+<main class="chapter">
+  <header class="chapter-hero">
+    <div class="eyebrow">Chapter 04</div>
+    <h1>Evoformer</h1>
+    <p class="lead">AlphaFold2의 몸통(trunk)은 48개의 <b>Evoformer 블록</b>입니다. 이 블록은 단백질 구조 예측을 <b>“3차원 공간의 그래프 추론 문제”</b>로 봅니다. MSA 표현과 쌍(pair) 표현이 서로 정보를 주고받고, 쌍 표현은 <b>삼각형</b> 단위로 갱신되어 기하학적 일관성을 학습합니다.</p>
+    <ul class="objectives">
+      <li>MSA 표현과 쌍 표현의 모양과 의미를 설명할 수 있다.</li>
+      <li>행/열 방향 축 어텐션(axial attention)이 왜 필요한지 계산 비용으로 이해한다.</li>
+      <li>외적 평균(outer product mean)이 공진화 통계와 어떻게 연결되는지 실험한다.</li>
+      <li>삼각형 곱셈 업데이트와 삼각형 어텐션의 네 가지 변형을 구분할 수 있다.</li>
+    </ul>
+    <p class="paper-ref">관련 원문: <b>The AlphaFold network</b> · <b>Evoformer</b> · <b>Fig. 3a–c</b> · Supplementary Methods 1.6</p>
+  </header>
+
+  <section>
+    <h2><span class="h-num">4.1</span>두 개의 표현: MSA와 쌍</h2>
+    <p>Evoformer는 두 개의 텐서를 들고 다닙니다.</p>
+    <ul>
+      <li><b>MSA 표현</b> \(m \in \mathbb{R}^{N_{seq}\times N_{res}\times c_m}\), \(c_m=256\): 행 = 서열, 열 = 잔기 위치. 첫 행은 질의(query) 서열이며, 나중에 Structure Module의 <b>단일 표현</b>(single representation)이 됩니다.</li>
+      <li><b>쌍 표현</b> \(z \in \mathbb{R}^{N_{res}\times N_{res}\times c_z}\), \(c_z=128\): 잔기 쌍 (i, j)의 관계. 논문은 이것을 <b>방향 그래프의 간선</b>으로 해석합니다(Fig. 3b).</li>
+    </ul>
+    <figure class="diagram">
+      <svg viewBox="0 0 860 260" role="img" aria-label="MSA 표현과 쌍 표현">
+        <g transform="translate(20,30)">
+          <text x="150" y="-8" text-anchor="middle" class="t-b">MSA 표현 (N_seq × N_res × c_m)</text>
+          <g id="msaGrid"></g>
+          <rect x="0" y="0" width="300" height="24" fill="none" stroke="var(--accent)" stroke-width="2.5" rx="3"/>
+          <text x="306" y="17" class="t-acc">query 행</text>
+          <rect x="125" y="0" width="25" height="180" fill="none" stroke="var(--accent-2)" stroke-width="2.5" rx="3"/>
+          <text x="137" y="200" text-anchor="middle" class="t-acc2">잔기 i의 열</text>
+        </g>
+        <g transform="translate(470,30)">
+          <text x="100" y="-8" text-anchor="middle" class="t-b">쌍 표현 (N_res × N_res × c_z)</text>
+          <g id="pairGrid"></g>
+          <rect x="125" y="50" width="25" height="25" fill="none" stroke="var(--accent)" stroke-width="2.5"/>
+          <text x="100" y="222" text-anchor="middle" class="t-dim">z_ij: “i와 j의 관계”</text>
+        </g>
+        <g transform="translate(720,60)">
+          <circle cx="40" cy="20" r="14" class="f-acc-soft"/><text x="40" y="25" text-anchor="middle" class="t">i</text>
+          <circle cx="110" cy="40" r="14" class="f-acc-soft"/><text x="110" y="45" text-anchor="middle" class="t">j</text>
+          <circle cx="70" cy="110" r="14" class="f-acc-soft"/><text x="70" y="115" text-anchor="middle" class="t">k</text>
+          <path d="M54 23 L95 36" class="s-acc" marker-end="url(#a4)"/>
+          <path d="M45 33 L63 96" class="s-line"/><path d="M103 53 L78 97" class="s-line"/>
+          <text x="75" y="150" text-anchor="middle" class="t-dim">간선 = z_ij</text>
+          <defs><marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="var(--accent)"/></marker></defs>
+        </g>
+      </svg>
+      <figcaption><b>그림 4-1.</b> 두 표현과 그래프 해석. 쌍 표현의 각 원소 z<sub>ij</sub>는 잔기 i→j 방향 간선의 특징 벡터입니다. 거리·방향 같은 관계가 여기에 암묵적으로 저장됩니다.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2><span class="h-num">4.2</span>Evoformer 블록 한 개 해부</h2>
+    <figure class="diagram">
+      <svg viewBox="0 0 860 330" role="img" aria-label="Evoformer 블록 구조">
+        <defs><marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0L10,5L0,10z" fill="var(--text-dim)"/></marker></defs>
+        <text x="10" y="70" class="t-b">MSA</text><text x="10" y="88" class="t-mono">(s,r,c_m)</text>
+        <text x="10" y="250" class="t-b">쌍</text><text x="10" y="268" class="t-mono">(r,r,c_z)</text>
+        <line x1="70" y1="75" x2="840" y2="75" class="s-faint" stroke-width="2"/>
+        <line x1="70" y1="255" x2="840" y2="255" class="s-faint" stroke-width="2"/>
+        <g class="evo-op" data-k="row"><rect x="85" y="40" width="130" height="70" rx="10" class="f-acc-soft"/><text x="150" y="68" text-anchor="middle" class="t">행 방향 게이트</text><text x="150" y="86" text-anchor="middle" class="t">어텐션 + 쌍 편향</text></g>
+        <g class="evo-op" data-k="col"><rect x="230" y="40" width="120" height="70" rx="10" class="f-acc-soft"/><text x="290" y="68" text-anchor="middle" class="t">열 방향 게이트</text><text x="290" y="86" text-anchor="middle" class="t">어텐션</text></g>
+        <g class="evo-op" data-k="trans"><rect x="365" y="40" width="80" height="70" rx="10" class="f-surface"/><text x="405" y="80" text-anchor="middle" class="t">전이(MLP)</text></g>
+        <g class="evo-op" data-k="opm"><rect x="460" y="130" width="120" height="60" rx="10" class="f-acc2-soft"/><text x="520" y="156" text-anchor="middle" class="t">외적 평균</text><text x="520" y="174" text-anchor="middle" class="t-mono">MSA → 쌍</text></g>
+        <path d="M520 75 L520 128" class="s-acc2" marker-end="url(#a5)"/><path d="M520 190 L520 253" class="s-acc2" marker-end="url(#a5)"/>
+        <g class="evo-op" data-k="tmo"><rect x="85" y="220" width="120" height="70" rx="10" class="f-ok-soft"/><text x="145" y="248" text-anchor="middle" class="t">삼각형 곱셈</text><text x="145" y="266" text-anchor="middle" class="t">(나가는 간선)</text></g>
+        <g class="evo-op" data-k="tmi"><rect x="215" y="220" width="120" height="70" rx="10" class="f-ok-soft"/><text x="275" y="248" text-anchor="middle" class="t">삼각형 곱셈</text><text x="275" y="266" text-anchor="middle" class="t">(들어오는 간선)</text></g>
+        <g class="evo-op" data-k="tas"><rect x="545" y="220" width="120" height="70" rx="10" class="f-warn-soft"/><text x="605" y="248" text-anchor="middle" class="t">삼각형 어텐션</text><text x="605" y="266" text-anchor="middle" class="t">(시작 노드)</text></g>
+        <g class="evo-op" data-k="tae"><rect x="675" y="220" width="120" height="70" rx="10" class="f-warn-soft"/><text x="735" y="248" text-anchor="middle" class="t">삼각형 어텐션</text><text x="735" y="266" text-anchor="middle" class="t">(끝 노드)</text></g>
+        <rect x="805" y="225" width="45" height="60" rx="10" class="f-surface"/><text x="827" y="260" text-anchor="middle" class="t-dim">전이</text>
+        <path d="M150 220 L150 112" class="s-acc" stroke-dasharray="5 4" marker-end="url(#a5)"/>
+        <text x="158" y="170" class="t-acc">쌍 편향 b_ij</text>
+        <text x="430" y="320" text-anchor="middle" class="t-dim">모든 연산은 잔차(residual) 연결: x ← x + Op(x) · 48개 블록은 가중치를 공유하지 않음</text>
+      </svg>
+      <figcaption><b>그림 4-2.</b> Evoformer 블록(원 논문 Fig. 3a 재구성). 상자를 눌러 각 연산의 설명을 보세요. 정보는 <b>MSA → 쌍</b>(외적 평균)과 <b>쌍 → MSA</b>(행 어텐션의 편향) 두 방향으로 흐릅니다.</figcaption>
+    </figure>
+    <div class="callout" id="evoInfo"><strong>행 방향 게이트 어텐션 + 쌍 편향</strong><p>상자를 눌러 보세요.</p></div>
+  </section>
+
+  <section>
+    <h2><span class="h-num">4.3</span>축 어텐션: 행 따로, 열 따로</h2>
+    <p>MSA 전체(N<sub>seq</sub>·N<sub>res</sub>개 토큰)에 일반 셀프 어텐션을 걸면 비용이 \(O((N_{seq}N_{res})^2)\)이라 불가능합니다. 그래서 <b>축 어텐션</b>을 씁니다: 행 방향(같은 서열 안의 잔기끼리)과 열 방향(같은 위치의 서열끼리)을 번갈아 적용합니다. 행 방향 어텐션에는 쌍 표현에서 투영한 <b>편향 b<sub>ij</sub></b>가 더해집니다.</p>
+    <div class="formula">$$a^h_{sij} = \operatorname{softmax}_j\!\Big(\tfrac{1}{\sqrt{c}}\,\mathbf{q}^h_{si}\cdot\mathbf{k}^h_{sj} + b^h_{ij}\Big),\qquad \mathbf{o}^h_{si} = \mathbf{g}^h_{si}\odot\sum_j a^h_{sij}\,\mathbf{v}^h_{sj}$$
+      <div class="where">\(b^h_{ij}=\mathrm{Linear}(z_{ij})\): 쌍 표현이 “i와 j는 가까우니 서로 보라”고 MSA 어텐션을 조종합니다. \(\mathbf{g}=\sigma(\mathrm{Linear}(m_{si}))\): 게이트. 모든 서열 s가 같은 편향 b<sub>ij</sub>를 공유합니다.</div></div>
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag">SIMULATOR</span><h3>축 어텐션 탐색기</h3>
+        <div class="seg" id="axMode"><button data-v="row" class="on">행 방향</button><button data-v="col">열 방향</button><button data-v="full">전체(가상)</button></div></div>
+      <div class="sim-view"><canvas id="axCv"></canvas><span class="hint">셀을 클릭하거나 위에 마우스를 올려 보세요</span></div>
+      <div class="sim-controls">
+        <label class="ctrl"><span>N<sub>seq</sub> (클러스터 MSA) <output></output></span><input type="range" id="axS" min="16" max="1024" step="16" value="512"></label>
+        <label class="ctrl"><span>N<sub>res</sub> <output></output></span><input type="range" id="axR" min="64" max="2048" step="64" value="384"></label>
+      </div>
+      <div class="sim-readout">
+        <div class="stat"><span class="k">행 어텐션 로짓 수</span><span class="v" id="axRow">—</span></div>
+        <div class="stat"><span class="k">열 어텐션 로짓 수</span><span class="v" id="axCol">—</span></div>
+        <div class="stat"><span class="k">전체 어텐션 로짓 수</span><span class="v" id="axFull">—</span></div>
+        <div class="stat"><span class="k">절약 배율</span><span class="v" id="axSave">—</span></div>
+      </div>
+      <div class="sim-note">헤드 하나 기준 어텐션 행렬 원소 수. 행: N<sub>seq</sub>·N<sub>res</sub><sup>2</sup>, 열: N<sub>res</sub>·N<sub>seq</sub><sup>2</sup>, 전체: (N<sub>seq</sub>N<sub>res</sub>)<sup>2</sup>. 파란 셀이 질의, 보라 셀이 어텐션 대상입니다. 행 방향에서는 쌍 편향이 대상의 진하기로 표시됩니다(가상의 접촉 패턴).</div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="h-num">4.4</span>외적 평균: MSA가 쌍에게 말하는 법</h2>
+    <p>MSA 표현의 정보를 쌍 표현으로 옮기는 연산입니다. 열 i와 열 j의 벡터를 서열마다 외적하고, 서열 축으로 평균을 냅니다. 이전 연구(rawMSA)와 달리 <b>모든 블록에서</b> 반복되어 MSA → 쌍 소통이 계속 이어집니다.</p>
+    <div class="formula">$$\mathbf{o}_{ij} = \operatorname{flatten}\Big(\frac{1}{N_{seq}}\sum_{s}\mathbf{a}_{si}\otimes\mathbf{b}_{sj}\Big),\qquad z_{ij} \mathrel{+}= \mathrm{Linear}(\mathbf{o}_{ij})$$
+      <div class="where">\(\mathbf{a}_{si},\mathbf{b}_{sj}=\mathrm{Linear}(m_{si}), \mathrm{Linear}(m_{sj})\) (차원 32). 핵심 통찰: 만약 \(\mathbf{a},\mathbf{b}\)가 아미노산의 원-핫 벡터라면, 외적 평균은 정확히 <b>쌍 빈도 표 \(f_{ij}(a,b)\)</b> — 3장 공진화 통계의 재료 — 가 됩니다.</div></div>
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag">SIMULATOR</span><h3>외적 평균 = 학습 가능한 공진화 통계</h3></div>
+      <div class="sim-view"><canvas id="opCv"></canvas></div>
+      <div class="sim-controls">
+        <label class="ctrl"><span>열 i <output></output></span><input type="range" id="opI" min="0" max="11" value="2"></label>
+        <label class="ctrl"><span>열 j <output></output></span><input type="range" id="opJ" min="0" max="11" value="9"></label>
+        <label class="ctrl"><span>서열 수 <output></output></span><input type="range" id="opN" min="4" max="200" value="40"></label>
+        <div class="ctrl-row"><button class="btn" id="opRe">다시 샘플링</button></div>
+      </div>
+      <div class="sim-readout">
+        <div class="stat"><span class="k">두 열의 관계</span><span class="v" id="opRel">—</span></div>
+        <div class="stat"><span class="k">‖평균 외적 − 독립 기대‖</span><span class="v" id="opDev">—</span></div>
+      </div>
+      <div class="sim-note">장난감 MSA(12열, 4-문자 알파벳)에서 열 (2, 9)와 (4, 7)은 서로 보완 변이하도록 생성했습니다. 왼쪽: 서열별 외적(원-핫 → 4×4 한 칸만 1). 가운데: 평균 = 쌍 빈도. 오른쪽: 평균 − (f<sub>i</sub> ⊗ f<sub>j</sub>) = 독립이었다면 기대되는 값과의 차이 = 공진화 신호.</div>
+    </div>
+    <p class="tryit"><b>해볼 것:</b> ① (i, j) = (2, 9)에서 오른쪽 행렬에 뚜렷한 패턴이 생기는 것을 보세요. ② j를 8로 바꾸면 패턴이 사라집니다(독립). ③ 서열 수를 5로 줄이면 독립 열에서도 우연한 패턴이 생깁니다 — 얕은 MSA의 위험.</p>
+  </section>
+
+  <section>
+    <h2><span class="h-num">4.5</span>삼각형으로 생각하기</h2>
+    <p>쌍 표현이 하나의 3D 구조로 실현 가능하려면 수많은 제약을 만족해야 합니다. 대표적인 것이 <b>삼각 부등식</b> \(d_{ij}\le d_{ik}+d_{kj}\)입니다. 그래서 논문은 쌍 표현의 갱신을 <b>세 노드 i, j, k로 이루어진 삼각형</b> 단위로 설계했습니다(Fig. 3c). 간선 ij를 갱신할 때, 세 번째 노드 k를 거치는 다른 두 간선의 정보를 사용합니다.</p>
+    <div class="formula">$$\text{나가는 간선:}\ \tilde z_{ij} = \mathbf{g}_{ij}\odot\mathrm{Linear}\Big(\mathrm{LN}\big(\textstyle\sum_k \mathbf{a}_{ik}\odot\mathbf{b}_{jk}\big)\Big)\qquad \text{들어오는 간선:}\ \textstyle\sum_k \mathbf{a}_{ki}\odot\mathbf{b}_{kj}$$
+    $$\text{시작 노드 어텐션:}\ a_{ijk} = \operatorname{softmax}_k\big(\tfrac{1}{\sqrt c}\mathbf{q}_{ij}\cdot\mathbf{k}_{ik} + b_{jk}\big),\quad \mathbf{o}_{ij}=\mathbf{g}_{ij}\odot\textstyle\sum_k a_{ijk}\mathbf{v}_{ik}$$
+      <div class="where">끝 노드 어텐션은 \(\mathbf{q}_{ij}\cdot\mathbf{k}_{kj} + b_{ki}\), 값은 \(\mathbf{v}_{kj}\). 어텐션 버전의 편향 \(b\)가 바로 삼각형의 <b>“빠진 세 번째 간선”</b>입니다.</div></div>
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag">SIMULATOR</span><h3>삼각형 업데이트 네 가지 변형</h3>
+        <div class="seg" id="triMode"><button data-v="out" class="on">곱셈·나가는</button><button data-v="in">곱셈·들어오는</button><button data-v="start">어텐션·시작</button><button data-v="end">어텐션·끝</button></div></div>
+      <div class="sim-body side">
+        <div class="sim-view"><canvas id="triCv"></canvas><span class="hint">노드 두 개를 차례로 클릭해 간선 ij 선택</span></div>
+        <div class="sim-controls">
+          <label class="ctrl"><span>현재 k <output></output></span><input type="range" id="triK" min="0" max="7" value="3"></label>
+          <label class="check"><input type="checkbox" id="triAnim" checked> k 자동 순회 애니메이션</label>
+          <div id="triText" style="font-size:14px;line-height:1.7"></div>
+        </div>
+      </div>
+      <div class="sim-note">파란 굵은 화살표 = 갱신되는 간선 z<sub>ij</sub>. 초록 = 값/곱셈에 쓰이는 간선, 주황 점선 = 어텐션 편향으로 쓰이는 “세 번째 간선”. 모든 k에 대해 합(또는 가중합)을 취합니다 → 비용 \(O(N_{res}^3)\).</div>
+    </div>
+    <div class="callout deep"><strong>두 종류를 모두 쓰는 이유</strong>
+      <p>Main: 삼각형 곱셈 업데이트는 원래 어텐션보다 “더 대칭적이고 저렴한 대체물”로 개발되었고, 어텐션만 또는 곱셈만 쓰는 네트워크도 높은 정확도를 낼 수 있었습니다. 그러나 <b>두 가지를 결합하면 더 정확</b>했습니다.</p></div>
+
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag">SIMULATOR</span><h3>삼각 부등식과 쌍 표현의 일관성</h3></div>
+      <div class="sim-view"><canvas id="tiCv"></canvas></div>
+      <div class="sim-controls">
+        <label class="ctrl"><span>거리 잡음 <output></output></span><input type="range" id="tiNoise" min="0" max="0.6" step="0.02" value="0.3"></label>
+        <label class="ctrl"><span>심한 오류 간선 수 <output></output></span><input type="range" id="tiOut" min="0" max="12" value="4"></label>
+        <div class="ctrl-row"><button class="btn primary" id="tiStep">삼각형 갱신 1회</button><button class="btn" id="tiReset">새로 만들기</button></div>
+      </div>
+      <div class="sim-readout">
+        <div class="stat"><span class="k">삼각 부등식 위반 수</span><span class="v" id="tiViol">—</span></div>
+        <div class="stat"><span class="k">거리 오차 (평균)</span><span class="v" id="tiErr">—</span></div>
+        <div class="stat"><span class="k">3D(여기선 2D) 복원 RMSD</span><span class="v" id="tiRmsd">—</span></div>
+        <div class="stat"><span class="k">갱신 횟수</span><span class="v" id="tiIt">0</span></div>
+      </div>
+      <div class="sim-note">14개 점(실제 구조)의 거리 행렬에 잡음과 심한 오류를 넣고, 각 간선을 다른 두 간선 경로와 비교해 고치는 단순 규칙 \(d_{ij}\leftarrow \tfrac12 d_{ij} + \tfrac12\min\!\big(d_{ij},\,\mathrm{median}_k(d_{ik}+d_{kj})\big)\)을 적용합니다. 오른쪽은 고전적 MDS로 거리 행렬에서 좌표를 복원한 결과(회색 = 정답). AlphaFold2의 삼각형 연산은 이런 규칙을 <b>학습</b>합니다 — 이것은 직관을 위한 비유입니다.</div>
+    </div>
+    <p class="tryit"><b>해볼 것:</b> ① 심한 오류 간선이 있을 때 빨간 위반 표시가 어디 몰리는지 보세요. ② “삼각형 갱신”을 몇 번 누르면 위반 수와 복원 RMSD가 함께 줄어듭니다 — <b>국소적인 삼각형 규칙만으로 전역적 일관성</b>이 생깁니다.</p>
+  </section>
+
+  <section>
+    <h2><span class="h-num">4.6</span>의사 코드로 다시 보기</h2>
+    <pre><code><span class="c"># Evoformer block (Supplementary Algorithm 6, 단순화)</span>
+<span class="k">def</span> evoformer_block(m, z):           <span class="c"># m: (s, r, 256), z: (r, r, 128)</span>
+    m += RowAttentionWithPairBias(m, z)   <span class="c"># 쌍 → MSA</span>
+    m += ColumnAttention(m)
+    m += Transition(m)
+    z += OuterProductMean(m)              <span class="c"># MSA → 쌍</span>
+    z += TriangleMultiplicationOutgoing(z)
+    z += TriangleMultiplicationIncoming(z)
+    z += TriangleAttentionStartingNode(z)
+    z += TriangleAttentionEndingNode(z)
+    z += Transition(z)
+    <span class="k">return</span> m, z
+
+<span class="k">for</span> l <span class="k">in</span> range(48):                     <span class="c"># 블록마다 다른 가중치</span>
+    m, z = evoformer_block[l](m, z)
+single = Linear(m[0])                     <span class="c"># query 행 → 단일 표현 (r, 384)</span></code></pre>
+    <div class="callout tip"><strong>Transformer와 무엇이 다른가?</strong>
+      <p>일반 Transformer는 토큰의 1차원 열을 다룹니다. Evoformer는 <b>2차원 격자 두 개</b>를 다루고, 그중 하나(쌍)는 기하학적 제약을 반영하는 <b>삼각형 연산</b>으로 갱신됩니다. 또 거의 모든 어텐션에 시그모이드 <b>게이트</b>가 붙어 있습니다. 이런 귀납 편향이 제한된 PDB 데이터(2018년 4월까지 공개된 구조)로도 효율적으로 학습할 수 있게 합니다.</p></div>
+  </section>
+
+  <section class="keypoints">
+    <h2>핵심 정리</h2>
+    <ol>
+      <li>Evoformer는 MSA 표현(s×r×256)과 쌍 표현(r×r×128)을 함께 갱신하는 48개 블록이다.</li>
+      <li>MSA에는 행/열 축 어텐션을 쓰고, 행 어텐션에 쌍 편향을 더해 쌍 → MSA 정보 흐름을 만든다.</li>
+      <li>외적 평균은 매 블록 MSA → 쌍 정보를 전달하며, 원-핫 특징이면 쌍 빈도 표와 같다.</li>
+      <li>쌍 표현은 세 노드의 삼각형 단위로 갱신된다: 곱셈(나가는/들어오는) + 어텐션(시작/끝 노드).</li>
+      <li>삼각형 연산은 삼각 부등식 같은 3D 일관성 제약을 학습하기 위한 귀납 편향이다.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>확인 퀴즈</h2>
+    <div class="quiz">
+      <div class="quiz-q" data-answer="3"><p>Q1. 쌍 표현에서 MSA 표현으로 정보가 흐르는 경로는?</p><div class="opts">
+        <button class="opt">외적 평균</button><button class="opt">열 방향 어텐션</button><button class="opt">삼각형 곱셈 업데이트</button><button class="opt">행 방향 어텐션의 쌍 편향</button></div>
+        <p class="quiz-exp">“we project additional logits from the pair stack to bias the MSA attention. This closes the loop…”</p></div>
+      <div class="quiz-q" data-answer="0"><p>Q2. 삼각형 어텐션(시작 노드)에서 간선 ij를 갱신할 때 편향으로 쓰이는 간선은?</p><div class="opts">
+        <button class="opt">jk</button><button class="opt">ik</button><button class="opt">ji</button><button class="opt">ki</button></div>
+        <p class="quiz-exp">시작 노드 i를 공유하는 간선 ik에 어텐션하고, 삼각형을 닫는 “빠진 간선” jk가 편향 b<sub>jk</sub>가 됩니다.</p></div>
+      <div class="quiz-q" data-answer="1"><p>Q3. MSA 전체에 일반 셀프 어텐션 대신 축 어텐션을 쓰는 주된 이유는?</p><div class="opts">
+        <button class="opt">축 어텐션이 회전 불변이라서</button><button class="opt">(N<sub>seq</sub>N<sub>res</sub>)² 비용이 감당 불가능해서</button><button class="opt">열 방향 정보가 필요 없어서</button><button class="opt">BERT 손실과 호환되지 않아서</button></div>
+        <p class="quiz-exp">N<sub>seq</sub>=512, N<sub>res</sub>=384이면 전체 어텐션 원소가 약 3.9×10<sup>10</sup>개로, 축 어텐션보다 수백 배 큽니다.</p></div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

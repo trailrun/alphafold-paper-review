@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>06 손실 함수와 학습 · FoldBook</title>
+<link rel="stylesheet" href="../css/style.css">
+<link rel="icon" href="../favicon.svg">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+<script src="../data/proteins.js" defer></script>
+<script src="../js/common.js" defer></script>
+<script src="../js/ch6.js" defer></script>
+</head>
+<body>
+<main class="chapter">
+  <header class="chapter-hero">
+    <div class="eyebrow">Chapter 06</div>
+    <h1>손실 함수와 학습</h1>
+    <p class="lead">좋은 아키텍처만으로는 부족합니다. AlphaFold2는 <b>FAPE</b>라는 새로운 구조 손실, 디스토그램·마스크 MSA 같은 보조 손실, 레이블 없는 서열을 활용하는 <b>자기증류</b>, 그리고 출력을 다시 입력으로 넣는 <b>재활용(recycling)</b>을 결합해 학습합니다.</p>
+    <ul class="objectives">
+      <li>FAPE의 정의를 이해하고, RMSD·거리 행렬 손실과 무엇이 다른지 실험한다.</li>
+      <li>디스토그램과 BERT식 마스크 MSA 보조 손실의 역할을 설명할 수 있다.</li>
+      <li>자기증류(noisy student)로 35만 개 서열을 학습에 활용한 과정을 따라간다.</li>
+      <li>재활용과 학습 설정(데이터, 하드웨어, 기간)을 정확한 숫자로 말할 수 있다.</li>
+    </ul>
+    <p class="paper-ref">관련 원문: <b>End-to-end structure prediction</b> · <b>Training with labelled and unlabelled data</b> · <b>Methods: Training regimen</b> · Fig. 3f</p>
+  </header>
+
+  <section>
+    <h2><span class="h-num">6.1</span>전체 손실의 구성</h2>
+    <p>네트워크는 FAPE 손실과 여러 보조 손실로 감독됩니다(Methods). 가중치는 Supplementary 1.9에 나와 있습니다.</p>
+    <div class="formula">$$\mathcal{L}_{\text{train}} = 0.5\,\mathcal{L}_{\text{FAPE}} + 0.5\,\mathcal{L}_{\text{aux}} + 0.3\,\mathcal{L}_{\text{dist}} + 2.0\,\mathcal{L}_{\text{msa}} + 0.01\,\mathcal{L}_{\text{conf}}$$
+      <div class="where">미세조정 단계에서는 \(0.01\,\mathcal{L}_{\text{exp\_resolved}} + 1.0\,\mathcal{L}_{\text{viol}}\)이 추가됩니다. \(\mathcal{L}_{\text{aux}}\): Structure Module 중간층 FAPE + 비틀림각 손실, \(\mathcal{L}_{\text{conf}}\): pLDDT 예측 손실(7장).</div></div>
+    <div class="table-wrap"><table>
+      <tr><th>손실</th><th>입력</th><th>목표</th><th>역할</th></tr>
+      <tr><td><b>FAPE</b></td><td>최종 원자 좌표 + 프레임</td><td>실험 구조</td><td>주 손실. 국소 프레임 기준 원자 오차</td></tr>
+      <tr><td>디스토그램</td><td>최종 쌍 표현</td><td>Cβ 거리 구간(64개)</td><td>쌍 표현이 거리 정보를 담도록 유도</td></tr>
+      <tr><td>마스크 MSA</td><td>최종 MSA 표현</td><td>가려진 아미노산</td><td>공진화 해석 학습 (BERT)</td></tr>
+      <tr><td>pLDDT</td><td>Structure Module 단일 표현</td><td>실제 lDDT-Cα 구간</td><td>신뢰도 자기 추정</td></tr>
+      <tr><td>측쇄·위반</td><td>비틀림각, 결합 기하</td><td>정답 각도 / 물리 제약</td><td>원자 수준 디테일과 입체화학</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <h2><span class="h-num">6.2</span>FAPE: 프레임에 정렬한 점 오차</h2>
+    <p>RMSD는 구조 전체를 한 번 겹친 뒤 오차를 잽니다. FAPE는 <b>모든 잔기 프레임 각각에 맞춰</b> 구조를 겹친 뒤, 그 프레임에서 본 모든 원자의 위치 오차를 잽니다. 즉, “잔기 k의 입장에서 볼 때, 원자 i가 올바른 곳에 있는가?”를 N<sub>frames</sub> × N<sub>atoms</sub>번 묻습니다.</p>
+    <div class="formula">$$\mathcal{L}_{\text{FAPE}} = \frac{1}{Z}\;\operatorname*{mean}_{k,\,i}\;\min\!\Big(d_{\text{clamp}},\ \big\lVert T_k^{-1}\circ\mathbf{x}_i - T_k^{\text{true}\,-1}\circ\mathbf{x}_i^{\text{true}}\big\rVert\Big)$$
+      <div class="where">\(T_k\): 예측 프레임, \(\mathbf{x}_i\): 예측 원자 좌표, \(Z=10\) Å, \(d_{\text{clamp}}=10\) Å (클램프된 L1). 프레임 역변환은 원자를 잔기 k의 국소 좌표로 옮깁니다.</div></div>
+    <div class="callout paper"><strong>End-to-end structure prediction</strong>
+      <blockquote>“This creates a strong bias for atoms to be correct relative to the local frame of each residue … as well as providing the main source of chirality for AlphaFold.”</blockquote></div>
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag three">3D</span><span class="sim-tag data">REAL DATA</span><h3>FAPE vs RMSD vs 거리 행렬 손실: 거울상 실험</h3>
+        <div class="seg" id="fpMode"><button data-v="noise" class="on">잡음</button><button data-v="mirror">거울상</button><button data-v="hinge">힌지</button></div></div>
+      <div class="sim-body side">
+        <div class="sim-view"><canvas id="fpCv"></canvas><span class="hint">회색 = 정답 · 색 = 예측(최적 회전 중첩)</span></div>
+        <div class="sim-controls">
+          <label class="ctrl"><span>변형 강도 <output></output></span><input type="range" id="fpAmt" min="0" max="1" step="0.01" value="0.3"></label>
+          <label class="ctrl"><span>d<sub>clamp</sub> <output></output></span><input type="range" id="fpClamp" min="1" max="30" step="0.5" value="10"></label>
+          <div class="ctrl" style="font-size:13.5px;color:var(--text-dim)" id="fpDesc"></div>
+        </div>
+      </div>
+      <div class="sim-view" style="border-top:1px solid var(--border)"><canvas id="fpBar"></canvas></div>
+      <div class="sim-readout">
+        <div class="stat"><span class="k">RMSD (Kabsch, 회전만)</span><span class="v" id="fpR">—</span></div>
+        <div class="stat"><span class="k">dRMSD (거리 행렬)</span><span class="v" id="fpD">—</span></div>
+        <div class="stat"><span class="k">FAPE (클램프, Å)</span><span class="v" id="fpF">—</span></div>
+        <div class="stat"><span class="k">FAPE / Z</span><span class="v" id="fpFZ">—</span></div>
+      </div>
+      <div class="sim-note">헤모글로빈 α의 실제 Cα 좌표 사용. 프레임은 연속한 세 Cα(i−1, i, i+1)로 근사해 만들었습니다(실제 AlphaFold2는 N·Cα·C 사용). 거울상 = x좌표 부호 반전. 막대 길이 = 각 손실을 “σ = 3 Å 잡음”일 때의 값으로 나눈 상대 크기.</div>
+    </div>
+    <p class="tryit"><b>해볼 것:</b> ① <b>거울상</b>을 고르고 강도를 1로: 거리 행렬은 거울상과 원본이 완전히 같으므로 <b>dRMSD = 0</b>입니다. 거리만 맞추는 손실은 왼손·오른손을 구별하지 못합니다. FAPE는 크게 나옵니다. ② <b>힌지</b>에서 d<sub>clamp</sub>를 3 Å로 줄이면, 멀리 떨어진 도메인의 큰 오차가 잘려(클램프) 손실이 국소 정확도 위주가 됩니다. ③ 잡음 모드에서는 세 손실이 비슷하게 움직입니다.</p>
+  </section>
+
+  <section>
+    <h2><span class="h-num">6.3</span>보조 손실 ①: 디스토그램</h2>
+    <p>최종 쌍 표현 \(z_{ij}\)를 선형 투영해 잔기 쌍의 Cβ 거리 분포를 <b>64개 구간</b>(2–22 Å, 마지막 구간은 그 이상)으로 예측하고 교차 엔트로피로 학습합니다. AlphaFold1에서는 이 디스토그램이 <i>최종 출력</i>이었지만, AlphaFold2에서는 쌍 표현을 의미 있게 만드는 <i>보조 신호</i>입니다.</p>
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag data">REAL DATA</span><h3>디스토그램: 거리 대신 거리 분포를 예측</h3></div>
+      <div class="sim-view"><canvas id="dgCv"></canvas><span class="hint">왼쪽 거리 지도에서 (i, j)를 클릭</span></div>
+      <div class="sim-controls">
+        <label class="ctrl"><span>예측 불확실성 σ <output></output></span><input type="range" id="dgSig" min="0.3" max="6" step="0.1" value="1.2"></label>
+        <label class="ctrl"><span>예측 편향 <output></output></span><input type="range" id="dgBias" min="-5" max="5" step="0.1" value="0"></label>
+      </div>
+      <div class="sim-readout">
+        <div class="stat"><span class="k">선택 쌍 (i, j)</span><span class="v" id="dgPair">—</span></div>
+        <div class="stat"><span class="k">실제 거리</span><span class="v" id="dgTrue">—</span></div>
+        <div class="stat"><span class="k">교차 엔트로피</span><span class="v" id="dgCE">—</span></div>
+        <div class="stat"><span class="k">P(접촉 &lt; 8 Å)</span><span class="v" id="dgPc">—</span></div>
+      </div>
+      <div class="sim-note">왼쪽: 헤모글로빈 α의 실제 Cα 거리 지도(AlphaFold DB 좌표; 실제 손실은 Cβ 거리). 오른쪽: 선택한 쌍에 대한 <b>가상의</b> 예측 분포(가우시안 형태, σ와 편향을 직접 조절)와 정답 구간(초록). 교차 엔트로피 = −log p(정답 구간).</div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="h-num">6.4</span>보조 손실 ②: 마스크 MSA (BERT)</h2>
+    <p>입력 MSA의 일부를 무작위로 가리거나 바꾸고, 최종 MSA 표현에서 원래 아미노산을 맞히게 합니다. 언어 모델 BERT와 같은 아이디어지만, <b>사전학습이 아니라 구조 손실과 동시에</b> 학습합니다. 가려진 칸을 맞히려면 같은 열의 보존 패턴과 <b>공진화하는 다른 열</b>을 봐야 하므로, 네트워크는 공진화 해석법을 스스로 익힙니다.</p>
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag">GAME</span><h3>당신이 Evoformer라면: 가려진 아미노산 맞히기</h3></div>
+      <div class="mask-msa" id="bertMsa"></div>
+      <div class="pick" id="bertPick"></div>
+      <div class="sim-readout">
+        <div class="stat"><span class="k">선택한 칸</span><span class="v" id="bertSel">—</span></div>
+        <div class="stat"><span class="k">점수</span><span class="v" id="bertScore">0 / 0</span></div>
+        <div class="stat"><span class="k">힌트</span><span class="v" id="bertHint" style="font-size:13px;font-family:var(--font);font-weight:500">파란 칸을 누르세요</span></div>
+      </div>
+      <div class="sim-note"><button class="btn" id="bertNew">새 문제</button> 파란 ? 칸을 누른 뒤 아래 글자를 고르세요. 선택한 칸의 열과, 그 열과 <b>공진화하는 열</b>이 연보라로 강조됩니다. 실제 학습에서는 MSA 칸의 15%를 고르고, 그중 다수를 마스크 토큰으로, 일부를 무작위·프로파일 샘플·원래 값으로 바꿉니다(Supplementary 1.2.7).</div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="h-num">6.5</span>자기증류: 레이블 없는 서열에서 배우기</h2>
+    <p>PDB 구조만으로도 높은 정확도에 도달하지만, 저자들은 <b>noisy student</b> 방식의 자기증류로 정확도를 더 끌어올렸습니다(Fig. 4a의 “With self-distillation training”).</p>
+    <figure class="diagram">
+      <svg viewBox="0 0 860 220" role="img" aria-label="자기증류 파이프라인">
+        <defs><marker id="a7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="var(--text-dim)"/></marker></defs>
+        <rect x="10" y="20" width="150" height="70" rx="10" class="f-surface"/><text x="85" y="50" text-anchor="middle" class="t-b">PDB 구조</text><text x="85" y="70" text-anchor="middle" class="t-dim">≤ 2018-04-30</text>
+        <rect x="200" y="20" width="150" height="70" rx="10" class="f-acc-soft"/><text x="275" y="50" text-anchor="middle" class="t-b">1 · 교사 모델</text><text x="275" y="70" text-anchor="middle" class="t-dim">지도학습</text>
+        <rect x="10" y="130" width="150" height="70" rx="10" class="f-surface"/><text x="85" y="158" text-anchor="middle" class="t-b">Uniclust30 서열</text><text x="85" y="178" text-anchor="middle" class="t-mono">355,993개</text>
+        <rect x="200" y="130" width="150" height="70" rx="10" class="f-acc-soft"/><text x="275" y="158" text-anchor="middle" class="t-b">2 · 구조 예측</text><text x="275" y="178" text-anchor="middle" class="t-dim">전체 MSA 사용</text>
+        <rect x="390" y="130" width="150" height="70" rx="10" class="f-warn-soft"/><text x="465" y="158" text-anchor="middle" class="t-b">3 · 고신뢰 필터</text><text x="465" y="178" text-anchor="middle" class="t-dim">자신 있는 예측만</text>
+        <rect x="580" y="60" width="270" height="100" rx="12" class="f-ok-soft"/><text x="715" y="90" text-anchor="middle" class="t-b">4 · 학생 모델 (처음부터 재학습)</text>
+        <text x="715" y="114" text-anchor="middle" class="t">증류 75% (MSA 서브샘플) + PDB 25%</text>
+        <text x="715" y="136" text-anchor="middle" class="t-dim">크롭·MSA 서브샘플링 = “노이즈”</text>
+        <path d="M160 55h38M275 90v38M350 165h38M540 150l38-20M350 55 C450 55, 500 70, 578 90" class="s-line" marker-end="url(#a7)"/>
+      </svg>
+      <figcaption><b>그림 6-1.</b> 자기증류 절차(Methods). 학생은 교사와 같은 아키텍처·하이퍼파라미터를 쓰지만, 증강 때문에 교사의 예측을 그대로 외우기 어렵습니다 — 그래서 일반화가 좋아집니다.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2><span class="h-num">6.6</span>재활용: 네트워크 전체를 반복하기</h2>
+    <p>한 번의 순전파 출력(최종 쌍 표현, MSA 첫 행, 예측 Cα 위치로 만든 거리 특징)을 다음 순전파의 입력에 더해 <b>같은 네트워크를 다시 실행</b>합니다. 추론 시에는 3번 재활용(총 4회 실행)합니다. 학습 때는 재활용 횟수를 무작위로 정하고 마지막 반복에만 기울기를 흘려 비용을 줄입니다. 논문은 이것이 “적은 추가 학습 시간으로 정확도에 크게 기여한다”고 씁니다. 48개 Evoformer 블록 × 4회 = 192개 블록의 궤적이 8장 Fig. 4b의 근거입니다.</p>
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag">SIMULATOR</span><h3>재활용의 직관: 같은 정제 함수를 반복 적용</h3></div>
+      <div class="sim-view"><canvas id="rcCv"></canvas></div>
+      <div class="sim-controls">
+        <label class="ctrl"><span>재활용 횟수 <output></output></span><input type="range" id="rcN" min="0" max="8" value="3"></label>
+        <label class="ctrl"><span>1회 실행의 정제율 <output></output></span><input type="range" id="rcK" min="0.1" max="0.9" step="0.05" value="0.55"></label>
+      </div>
+      <div class="sim-note">개념 모델: 각 실행이 남은 오차의 일정 비율을 줄인다고 가정한 장난감 곡선(가로축 = 누적 Evoformer 블록). 실제 데이터가 아닙니다. 어려운 표적일수록 정제율이 낮아 재활용 이득이 크다는 점을 보여줍니다.</div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="h-num">6.7</span>학습 설정 한눈에</h2>
+    <div class="table-wrap"><table>
+      <tr><th>항목</th><th>값 (Methods)</th></tr>
+      <tr><td>학습 데이터</td><td>PDB 구조, 공개일 ≤ 2018년 4월 30일 (PDB 사본 2019-08-28)</td></tr>
+      <tr><td>샘플링</td><td>40% 서열 동일성 클러스터 크기의 역비례로 사슬 샘플링</td></tr>
+      <tr><td>크롭 / 배치</td><td>256 잔기로 무작위 크롭, 배치 128</td></tr>
+      <tr><td>하드웨어</td><td>TPU v3 128코어 (코어당 배치 1)</td></tr>
+      <tr><td>초기 학습</td><td>약 1,000만 샘플까지 수렴, 약 1주</td></tr>
+      <tr><td>미세조정</td><td>크롭 384, 더 큰 MSA 스택, 낮은 학습률 — 약 4일 추가</td></tr>
+      <tr><td>앙상블</td><td>서로 다른 시드의 모델 5개(일부는 템플릿 사용), 신뢰도로 최종 선택</td></tr>
+      <tr><td>CASP14 이후</td><td>pTM 예측 목표를 추가해 미세조정(Fig. 2d)</td></tr>
+      <tr><td>프레임워크</td><td>TensorFlow, Sonnet / 공개 코드는 JAX + Haiku</td></tr>
+    </table></div>
+  </section>
+
+  <section class="keypoints">
+    <h2>핵심 정리</h2>
+    <ol>
+      <li>FAPE는 모든 잔기 프레임 기준으로 모든 원자의 오차를 재는 클램프 L1 손실로, 국소 정확도와 손대칭성을 동시에 강제한다.</li>
+      <li>거리 행렬 기반 손실은 거울상을 구별하지 못하지만, FAPE는 프레임의 방향성 덕분에 구별한다.</li>
+      <li>디스토그램(64구간)과 BERT식 마스크 MSA는 쌍·MSA 표현을 의미 있게 만드는 보조 손실이다.</li>
+      <li>자기증류: 355,993개 서열을 예측 → 고신뢰만 골라 75%:25%로 PDB와 섞어 처음부터 재학습.</li>
+      <li>재활용은 네트워크 전체를 반복 적용해 적은 비용으로 정확도를 크게 올린다.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>확인 퀴즈</h2>
+    <div class="quiz">
+      <div class="quiz-q" data-answer="1"><p>Q1. 예측 구조가 정답의 완벽한 거울상일 때 0이 되는 손실은?</p><div class="opts">
+        <button class="opt">FAPE</button><button class="opt">거리 행렬 RMSD (dRMSD)</button><button class="opt">회전만 허용한 Kabsch RMSD</button><button class="opt">모두 0이 아니다</button></div>
+        <p class="quiz-exp">거울상은 모든 쌍 거리가 같으므로 거리 기반 손실은 구별하지 못합니다. FAPE는 프레임(오른손 좌표계) 기준이라 구별합니다.</p></div>
+      <div class="quiz-q" data-answer="2"><p>Q2. 자기증류 학습에서 최종 모델의 데이터 혼합 비율은?</p><div class="opts">
+        <button class="opt">PDB 75% · 증류 25%</button><button class="opt">증류 100%</button><button class="opt">증류 75% · PDB 25%</button><button class="opt">PDB 50% · 증류 50%</button></div>
+        <p class="quiz-exp">“sampling examples 75% of the time from the Uniclust prediction set … and 25% of the time from the clustered PDB set.”</p></div>
+      <div class="quiz-q" data-answer="0"><p>Q3. BERT식 마스크 MSA 목표를 구조 손실과 “함께” 학습하는 것의 의미는?</p><div class="opts">
+        <button class="opt">별도 사전학습 없이 같은 학습 예제에서 공진화 해석을 함께 익힌다</button><button class="opt">MSA를 입력에서 제거한다</button><button class="opt">학습 후에 MSA 언어 모델로 교체한다</button><button class="opt">추론 시에도 MSA를 가린다</button></div>
+        <p class="quiz-exp">“The BERT objective is trained jointly with the normal PDB structure loss on the same training examples and is not pre-trained.”</p></div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

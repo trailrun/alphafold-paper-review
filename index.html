@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FoldBook · AlphaFold2 논문 리뷰</title>
+<meta name="description" content="2024 노벨 화학상의 근거가 된 AlphaFold2 논문(Jumper et al., Nature 2021)을 인터랙티브 시뮬레이터로 읽는 한국어 논문 리뷰">
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230053d6'/%3E%3Cpath d='M6 22c3-9 6 4 9-5s6 6 11-4' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E">
+<script src="data/proteins.js" defer></script>
+<script src="js/common.js" defer></script>
+</head>
+<body>
+<div class="home">
+  <section class="hero">
+    <div>
+      <div class="eyebrow">Paper Review · Nature 596, 583 (2021)</div>
+      <h1>아미노산 서열에서<br><em>원자 수준 구조</em>까지</h1>
+      <p class="lead">2024년 노벨 화학상의 근거가 된 논문 <b>“Highly accurate protein structure prediction with AlphaFold”</b>를 9개 장, 30여 개의 인터랙티브 시뮬레이터로 해부합니다. 수식을 읽고, 그림을 보고, 슬라이더를 직접 움직이며 AlphaFold2가 <i>왜</i> 작동하는지 이해해 보세요.</p>
+      <div class="cta">
+        <a class="primary" href="chapters/problem.html">1장부터 시작하기 →</a>
+        <a class="ghost" href="chapters/evoformer.html">Evoformer 바로 보기</a>
+      </div>
+    </div>
+    <div>
+      <div class="hero-vis">
+        <canvas id="hero3d"></canvas>
+        <div class="cap" id="heroCap">AlphaFold DB 예측 구조 · 드래그로 회전</div>
+      </div>
+      <div class="ctrl-row" style="margin-top:10px;justify-content:space-between">
+        <div class="seg" id="heroSeg"><button data-v="P04637" class="on">p53</button><button data-v="P00698">리소자임</button><button data-v="P69905">헤모글로빈 α</button></div>
+        <div class="plddt-legend"><span><i style="background:#0053d6"></i>&gt;90</span><span><i style="background:#65cbf3"></i>70–90</span><span><i style="background:#ffdb13"></i>50–70</span><span><i style="background:#ff7d45"></i>&lt;50</span></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="stats-strip">
+    <div><b>0.96 Å</b><span>CASP14 백본 정확도 중앙값 (r.m.s.d.<sub>95</sub>)</span></div>
+    <div><b>2.8 Å</b><span>2위 방법의 같은 지표 — 약 3배 차이</span></div>
+    <div><b>48 + 8</b><span>Evoformer 블록 + Structure Module 층</span></div>
+    <div><b>2억+</b><span>AlphaFold DB에 공개된 예측 구조 수</span></div>
+  </div>
+
+  <h2>AlphaFold2 한눈에 보기</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 960 310" role="img" aria-label="AlphaFold2 파이프라인">
+      <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="var(--text-dim)"/></marker></defs>
+      <a href="chapters/problem.html"><rect x="10" y="110" width="130" height="80" rx="12" class="f-elev"/>
+        <text x="75" y="140" text-anchor="middle" class="t-b">입력 서열</text>
+        <text x="75" y="160" text-anchor="middle" class="t-mono">MKTAYIAKQR…</text>
+        <text x="75" y="178" text-anchor="middle" class="t-dim">01장</text></a>
+      <a href="chapters/msa.html"><rect x="180" y="40" width="150" height="90" rx="12" class="f-acc-soft"/>
+        <text x="255" y="72" text-anchor="middle" class="t-b">유전 DB 검색 → MSA</text>
+        <text x="255" y="92" text-anchor="middle" class="t-mono">N_seq × N_res</text>
+        <text x="255" y="112" text-anchor="middle" class="t-dim">03장</text></a>
+      <rect x="180" y="170" width="150" height="90" rx="12" class="f-surface"/>
+      <text x="255" y="202" text-anchor="middle" class="t-b">구조 DB → 템플릿</text>
+      <text x="255" y="222" text-anchor="middle" class="t-mono">→ pair (N_res × N_res)</text>
+      <text x="255" y="242" text-anchor="middle" class="t-dim">선택적 입력</text>
+      <a href="chapters/evoformer.html"><rect x="370" y="60" width="190" height="180" rx="14" class="f-acc2-soft"/>
+        <text x="465" y="92" text-anchor="middle" class="t-b">Evoformer × 48</text>
+        <rect x="390" y="108" width="150" height="44" rx="8" class="f-elev"/><text x="465" y="135" text-anchor="middle" class="t">MSA 표현 (s,r,c_m)</text>
+        <rect x="390" y="164" width="150" height="44" rx="8" class="f-elev"/><text x="465" y="191" text-anchor="middle" class="t">쌍 표현 (r,r,c_z)</text>
+        <path d="M455 152v12M475 164v-12" class="s-acc2" marker-end="url(#ar)"/>
+        <text x="465" y="228" text-anchor="middle" class="t-dim">04장</text></a>
+      <a href="chapters/structure.html"><rect x="600" y="80" width="160" height="140" rx="14" class="f-acc-soft"/>
+        <text x="680" y="112" text-anchor="middle" class="t-b">Structure Module</text>
+        <text x="680" y="132" text-anchor="middle" class="t">× 8 (가중치 공유)</text>
+        <text x="680" y="156" text-anchor="middle" class="t-mono">IPA · 잔기 기체</text>
+        <text x="680" y="176" text-anchor="middle" class="t-mono">(R_i, t_i) + χ각</text>
+        <text x="680" y="206" text-anchor="middle" class="t-dim">05장</text></a>
+      <a href="chapters/confidence.html"><rect x="800" y="90" width="150" height="120" rx="14" class="f-ok-soft"/>
+        <text x="875" y="122" text-anchor="middle" class="t-b">3D 구조</text>
+        <text x="875" y="144" text-anchor="middle" class="t">+ pLDDT · PAE</text>
+        <text x="875" y="166" text-anchor="middle" class="t-mono">모든 중원자 좌표</text>
+        <text x="875" y="194" text-anchor="middle" class="t-dim">07장</text></a>
+      <path d="M140 140 L178 95" class="s-line" marker-end="url(#ar)"/>
+      <path d="M140 160 L178 205" class="s-line" marker-end="url(#ar)"/>
+      <path d="M330 85 L368 120" class="s-line" marker-end="url(#ar)"/>
+      <path d="M330 215 L368 185" class="s-line" marker-end="url(#ar)"/>
+      <path d="M560 150 L598 150" class="s-line" marker-end="url(#ar)"/>
+      <path d="M760 150 L798 150" class="s-line" marker-end="url(#ar)"/>
+      <path d="M680 222 C680 290, 465 290, 465 242" class="s-acc" stroke-dasharray="6 5" marker-end="url(#ar)"/>
+      <text x="572" y="302" text-anchor="middle" class="t-acc">Recycling × 3 (출력을 다시 입력으로)</text>
+      <a href="chapters/training.html"><text x="680" y="58" text-anchor="middle" class="t-acc2">FAPE 손실 · 06장</text></a>
+    </svg>
+    <figcaption><b>그림 0-1.</b> AlphaFold2의 전체 흐름(원 논문 Fig. 1e를 단순화). 각 상자를 누르면 해당 장으로 이동합니다. 배열 모양의 s는 서열 수(N<sub>seq</sub>), r은 잔기 수(N<sub>res</sub>), c는 채널 수.</figcaption>
+  </figure>
+
+  <h2>전체 챕터</h2>
+  <div class="cards" id="cards"></div>
+
+  <h2>추천 학습 경로</h2>
+  <div class="paths">
+    <div class="path"><b>⏱ 30분 요약</b><a class="chip" href="chapters/problem.html">01</a><a class="chip" href="chapters/evoformer.html">04</a><a class="chip" href="chapters/structure.html">05</a><a class="chip" href="chapters/impact.html">09</a></div>
+    <div class="path"><b>🧬 생물학 배경</b><a class="chip" href="chapters/problem.html">01</a><a class="chip" href="chapters/msa.html">03</a><a class="chip" href="chapters/confidence.html">07</a><a class="chip" href="chapters/results.html">08</a></div>
+    <div class="path"><b>🤖 딥러닝 아키텍처</b><a class="chip" href="chapters/evoformer.html">04</a><a class="chip" href="chapters/structure.html">05</a><a class="chip" href="chapters/training.html">06</a></div>
+    <div class="path"><b>📏 평가·지표</b><a class="chip" href="chapters/casp.html">02</a><a class="chip" href="chapters/confidence.html">07</a><a class="chip" href="chapters/results.html">08</a></div>
+  </div>
+
+  <h2>이 사이트 사용법</h2>
+  <div class="howto">
+    <div><b>📖 읽기</b><p>각 장은 학습 목표 → 본문 → 핵심 정리 → 퀴즈 순서로 구성됩니다.</p></div>
+    <div><b>🖼 보기</b><p>모든 그림은 SVG/캔버스로 직접 그렸고 다크 모드에 맞춰 바뀝니다.</p></div>
+    <div><b>🎛 만지기</b><p><span class="sim-tag">SIMULATOR</span> 카드의 슬라이더·버튼을 움직여 보세요. 3D는 드래그로 회전합니다.</p></div>
+    <div><b>📊 실제 데이터</b><p><span class="sim-tag data">REAL DATA</span> 표시는 AlphaFold DB의 실제 예측(좌표·pLDDT·PAE)을 사용합니다.</p></div>
+    <div><b>✅ 확인하기</b><p>장 끝의 퀴즈로 이해도를 점검하세요.</p></div>
+  </div>
+
+  <h2>리뷰 대상 논문</h2>
+  <div class="callout paper"><strong>Jumper, J., Evans, R., Pritzel, A. et al. (2021)</strong>
+    <p><i>Highly accurate protein structure prediction with AlphaFold.</i> Nature 596, 583–589. <a href="https://doi.org/10.1038/s41586-021-03819-2" target="_blank" rel="noopener">doi:10.1038/s41586-021-03819-2</a> · 오픈 액세스(CC BY 4.0) · 코드 <a href="https://github.com/google-deepmind/alphafold" target="_blank" rel="noopener">github.com/google-deepmind/alphafold</a></p>
+    <p>2024년 노벨 화학상: 상금의 절반은 Demis Hassabis와 John Jumper(“단백질 구조 예측”), 나머지 절반은 David Baker(“계산적 단백질 설계”).</p>
+  </div>
+</div>
+
+<script>
+addEventListener('DOMContentLoaded', () => {
+  const sims = ['아미노산 탐색기 · 레빈탈 계산기 · φ/ψ 백본 빌더 · HP 격자 접힘', 'CASP14 결과 차트 · RMSD/GDT/lDDT/TM 실험실', '공진화 시뮬레이터 · MSA 깊이 스윕', '축 어텐션 · 외적 평균 · 삼각형 업데이트 · 삼각 부등식', '백본 프레임 · IPA 불변성 · 잔기 기체 접힘', 'FAPE vs RMSD 거울상 · BERT 마스킹 게임 · 디스토그램', '3D pLDDT 뷰어 + PAE · lDDT 계산기 · 보정 곡선', '블록 궤적 · 추론 비용 계산기 · 절제 실험', '노벨상 타임라인 · 리뷰 총평'];
+  document.getElementById('cards').innerHTML = AF.chapters.map((c, i) =>
+    `<a class="card" href="chapters/${c[0]}.html"><span class="n">CHAPTER ${String(i + 1).padStart(2, '0')}</span><b>${c[1]}</b><p>${c[2]}</p><span class="sims">▸ ${sims[i]}</span></a>`).join('');
+
+  let cur = 'P04637';
+  const v = AF.view3d(document.getElementById('hero3d'), {
+    height: 380, auto: 0.004,
+    getModel: () => {
+      const P = AF_PROTEINS[cur];
+      return { points: P.ca, color: (i) => AF.plddtColor(P.plddt[i]), lineWidth: cur === 'P04637' ? 3.2 : 5 };
+    }
+  });
+  const cap = document.getElementById('heroCap');
+  const upd = () => { const P = AF_PROTEINS[cur]; cap.textContent = `${P.name} · ${P.seq.length} 잔기 · AlphaFold DB 예측 · 드래그로 회전`; v.redraw(); };
+  AF.seg('heroSeg', (val) => { cur = val; v.zoom = 1; upd(); });
+  upd();
+});
+</script>
+</body>
+</html>

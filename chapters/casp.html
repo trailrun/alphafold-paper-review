@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>02 CASP와 정확도 지표 · FoldBook</title>
+<link rel="stylesheet" href="../css/style.css">
+<link rel="icon" href="../favicon.svg">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+<script src="../data/proteins.js" defer></script>
+<script src="../js/common.js" defer></script>
+<script src="../js/ch2.js" defer></script>
+</head>
+<body>
+<main class="chapter">
+  <header class="chapter-hero">
+    <div class="eyebrow">Chapter 02</div>
+    <h1>CASP와 정확도 지표</h1>
+    <p class="lead">“0.96 Å”라는 숫자는 정확히 무엇을 잰 것일까요? 논문의 핵심 주장을 이해하려면 먼저 구조 예측을 <b>어떻게 채점하는지</b> 알아야 합니다. 이 장에서는 실제 단백질 구조를 일부러 망가뜨려 보며 RMSD, GDT, lDDT, TM-score가 각각 무엇에 민감한지 실험합니다.</p>
+    <ul class="objectives">
+      <li>CASP가 왜 구조 예측의 “금본위 평가”인지 설명할 수 있다.</li>
+      <li>CASP14에서 AlphaFold2가 거둔 결과를 정확한 숫자로 읽을 수 있다.</li>
+      <li>중첩(superposition) 기반 지표와 중첩이 필요 없는 지표의 차이를 이해한다.</li>
+      <li>r.m.s.d.<sub>95</sub>의 계산 절차를 따라갈 수 있다.</li>
+    </ul>
+    <p class="paper-ref">관련 원문: <b>Main</b> · <b>Fig. 1a–d</b> · <b>Fig. 2a</b> · <b>Methods: Metrics</b></p>
+  </header>
+
+  <section>
+    <h2><span class="h-num">2.1</span>CASP: 정답을 모르는 상태의 시험</h2>
+    <p><span class="term">CASP</span><span class="en">(Critical Assessment of protein Structure Prediction)</span>는 1994년부터 2년마다 열리는 블라인드 평가입니다. 실험으로 막 풀렸지만 아직 PDB에 공개되지 않은 구조의 <b>서열만</b> 참가자에게 주고, 몇 주 안에 예측을 제출받은 뒤 공개된 실제 구조와 비교합니다. 데이터 누출이 원천적으로 불가능하다는 점에서 머신러닝 평가의 이상적인 형태입니다.</p>
+    <figure class="diagram">
+      <svg viewBox="0 0 860 170" role="img" aria-label="CASP 진행 방식">
+        <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="var(--text-dim)"/></marker></defs>
+        <rect x="10" y="30" width="170" height="90" rx="12" class="f-elev"/><text x="95" y="62" text-anchor="middle" class="t-b">실험 그룹</text><text x="95" y="84" text-anchor="middle" class="t-dim">구조를 풀었지만</text><text x="95" y="102" text-anchor="middle" class="t-dim">공개를 보류</text>
+        <rect x="230" y="30" width="170" height="90" rx="12" class="f-acc-soft"/><text x="315" y="62" text-anchor="middle" class="t-b">서열만 공개</text><text x="315" y="84" text-anchor="middle" class="t-mono">target T1049 …</text><text x="315" y="102" text-anchor="middle" class="t-dim">2020년 5–7월</text>
+        <rect x="450" y="30" width="170" height="90" rx="12" class="f-acc2-soft"/><text x="535" y="62" text-anchor="middle" class="t-b">참가 팀 예측</text><text x="535" y="84" text-anchor="middle" class="t-dim">CASP14: 146개 엔트리</text><text x="535" y="102" text-anchor="middle" class="t-dim">팀명 “AlphaFold2”</text>
+        <rect x="670" y="30" width="180" height="90" rx="12" class="f-ok-soft"/><text x="760" y="62" text-anchor="middle" class="t-b">독립 평가</text><text x="760" y="84" text-anchor="middle" class="t-dim">도메인 단위 채점</text><text x="760" y="102" text-anchor="middle" class="t-dim">GDT · lDDT · RMSD</text>
+        <path d="M180 75h48M400 75h48M620 75h48" class="s-line" marker-end="url(#a2)"/>
+        <text x="430" y="155" text-anchor="middle" class="t-acc">예측 시점에 정답은 세상 어디에도 공개되어 있지 않다 → 진짜 일반화 성능</text>
+      </svg>
+      <figcaption><b>그림 2-1.</b> CASP의 블라인드 평가 구조. 논문의 CASP14 분석은 87개 단백질 도메인을 대상으로 합니다.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2><span class="h-num">2.2</span>CASP14 결과: 논문의 헤드라인 숫자</h2>
+    <p>논문의 첫 결과 문단은 다음 네 숫자로 요약됩니다. 모두 <b>r.m.s.d.<sub>95</sub></b>(잔기의 95%만 사용한 Cα RMSD, 2.5절)의 중앙값과 95% 신뢰구간입니다.</p>
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag data">REAL NUMBERS</span><h3>CASP14 정확도: AlphaFold2 vs 차순위 방법</h3>
+        <div class="seg" id="cMode"><button data-v="bb" class="on">백본 (Cα)</button><button data-v="aa">전원자</button></div></div>
+      <div class="sim-view"><canvas id="caspCv"></canvas></div>
+      <div class="sim-readout">
+        <div class="stat"><span class="k">AlphaFold2 중앙값</span><span class="v" id="cAF">—</span></div>
+        <div class="stat"><span class="k">차순위 방법</span><span class="v" id="cNext">—</span></div>
+        <div class="stat"><span class="k">오차 비율</span><span class="v" id="cRatio">—</span></div>
+      </div>
+      <div class="sim-note">출처: 논문 Main 및 Fig. 1a(백본), Supplementary Fig. 14(전원자). 오차 막대 = 중앙값의 95% 신뢰구간(부트스트랩 10,000회). 회색 점선 = 탄소 원자 지름(약 1.4 Å).</div>
+    </div>
+    <div class="callout paper"><strong>Main</strong>
+      <blockquote>“AlphaFold structures had a median backbone accuracy of 0.96 Å r.m.s.d.<sub>95</sub> … whereas the next best performing method had a median backbone accuracy of 2.8 Å r.m.s.d.<sub>95</sub> … As a comparison point for this accuracy, the width of a carbon atom is approximately 1.4 Å.”</blockquote></div>
+    <p>논문 Fig. 1b–d는 대표 사례를 보여줍니다.</p>
+    <div class="table-wrap"><table>
+      <tr><th>그림</th><th>표적</th><th>무엇을 보여주나</th></tr>
+      <tr><td>Fig. 1b</td><td>T1049 (PDB 6Y4F)</td><td>예측(파랑)과 실험 구조(초록)가 거의 완벽히 겹침</td></tr>
+      <tr><td>Fig. 1c</td><td>T1056 (PDB 6YJ1)</td><td>아연 결합 부위의 곁사슬까지 정확 — 아연 이온은 예측하지 않았는데도</td></tr>
+      <tr><td>Fig. 1d</td><td>T1044 (PDB 6VR4)</td><td>2,180 잔기 단일 사슬, 구조적 상동체 없이 도메인 배치까지 정확</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <h2><span class="h-num">2.3</span>정확도를 재는 네 가지 자</h2>
+    <p>예측 구조 \(\hat{x}\)와 실제 구조 \(x\)를 비교하는 대표 지표들입니다. 핵심 차이는 <b>“먼저 두 구조를 겹쳐야 하는가”</b>입니다.</p>
+    <div class="formula">$$\text{RMSD} = \min_{R,\,t}\sqrt{\frac{1}{N}\sum_{i=1}^{N}\lVert R\hat{x}_i + t - x_i\rVert^2}$$
+      <div class="where">최적 회전 \(R\)과 평행이동 \(t\)는 Kabsch 알고리즘(여기서는 Horn의 사원수 방법)으로 구합니다. 큰 오차 몇 개에 매우 민감합니다.</div></div>
+    <div class="formula">$$\text{GDT\_TS} = \tfrac{1}{4}\big(P_{1\text{Å}} + P_{2\text{Å}} + P_{4\text{Å}} + P_{8\text{Å}}\big)$$
+      <div class="where">\(P_d\): 최적 중첩 후 \(d\) Å 이내에 들어오는 잔기의 최대 비율. CASP의 공식 도메인 지표(0–100).</div></div>
+    <div class="formula">$$\text{lDDT} = \frac{1}{4}\sum_{\delta\in\{0.5,1,2,4\}}\frac{\#\{(i,j): |\hat d_{ij}-d_{ij}|<\delta,\ d_{ij}<R_0\}}{\#\{(i,j): d_{ij}<R_0\}}$$
+      <div class="where"><b>중첩이 필요 없는</b> 국소 지표. 실제 구조에서 \(R_0=15\) Å 이내인 원자 쌍의 거리가 얼마나 보존되었는지 봅니다. AlphaFold2의 신뢰도 pLDDT가 예측하는 대상(7장).</div></div>
+    <div class="formula">$$\text{TM-score} = \max_{R,t}\frac{1}{L}\sum_{i=1}^{L}\frac{1}{1+(d_i/d_0)^2},\quad d_0 = 1.24\sqrt[3]{L-15}-1.8$$
+      <div class="where">길이에 따라 정규화된 전역 지표(0–1). 0.5 이상이면 대체로 같은 폴드. 논문은 전체 사슬 평가와 pTM에 사용합니다.</div></div>
+
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag three">3D</span><span class="sim-tag data">REAL DATA</span><h3>지표 실험실: 구조를 망가뜨려 보자</h3></div>
+      <div class="sim-body side">
+        <div class="sim-view"><canvas id="mCv"></canvas><span class="hint">회색 = 실제 · 예측 오차: <b style="color:#0053d6">&lt;1</b> <b style="color:#65cbf3">&lt;2</b> <b style="color:#e0b800">&lt;4</b> <b style="color:#ff7d45">≥4 Å</b> · 드래그 회전</span></div>
+        <div class="sim-controls">
+          <label class="ctrl"><span>대상 단백질</span><select id="mProt"><option value="P69905">헤모글로빈 α (142)</option><option value="P00698">리소자임 C (147)</option></select></label>
+          <label class="ctrl"><span>전역 회전 <output></output></span><input type="range" id="mRot" min="0" max="180" value="30"></label>
+          <label class="ctrl"><span>무작위 잡음 σ <output></output></span><input type="range" id="mNoise" min="0" max="4" step="0.1" value="0.5"></label>
+          <label class="ctrl"><span>힌지 회전 (C말단 절반) <output></output></span><input type="range" id="mHinge" min="0" max="90" value="0"></label>
+          <label class="ctrl"><span>고리 하나 크게 틀림 <output></output></span><input type="range" id="mLoop" min="0" max="15" step="0.5" value="0"></label>
+          <label class="check"><input type="checkbox" id="mAlign" checked> 최적 중첩 후 표시</label>
+          <button class="btn" id="mResample">잡음 다시 뽑기</button>
+        </div>
+      </div>
+      <div class="sim-readout">
+        <div class="stat"><span class="k">RMSD (중첩 없음)</span><span class="v" id="mR0">—</span></div>
+        <div class="stat"><span class="k">RMSD (Kabsch)</span><span class="v" id="mR1">—</span></div>
+        <div class="stat"><span class="k">r.m.s.d.<sub>95</sub></span><span class="v" id="mR95">—</span></div>
+        <div class="stat"><span class="k">GDT_TS</span><span class="v" id="mGDT">—</span></div>
+        <div class="stat"><span class="k">lDDT-Cα</span><span class="v" id="mLDDT">—</span></div>
+        <div class="stat"><span class="k">TM-score</span><span class="v" id="mTM">—</span></div>
+      </div>
+      <div class="sim-note">“실제 구조”로 AlphaFold DB의 Cα 좌표를 사용하고, 예측을 인위적으로 변형합니다. GDT는 여러 시드에서 반복 중첩해 최대값을 찾는 근사 구현, TM-score도 반복 중첩 근사입니다.</div>
+    </div>
+    <p class="tryit"><b>해볼 것:</b> ① 전역 회전만 바꿔 보세요. 중첩 없는 RMSD는 폭증하지만 나머지는 그대로입니다. ② <b>힌지</b>를 40°로 — 두 도메인 각각은 완벽한데 RMSD·GDT는 크게 나빠지고, <b>lDDT는 높게 유지</b>됩니다. 논문이 전체 사슬에 lDDT를 쓰는 이유입니다. ③ <b>고리 하나</b>만 10 Å 틀리게 하면 RMSD는 크게 오르지만 r.m.s.d.<sub>95</sub>는 덜 영향을 받습니다. ④ 잡음 σ를 1.4 Å(탄소 원자 지름)로 맞췄을 때 GDT가 몇인지 보세요.</p>
+  </section>
+
+  <section>
+    <h2><span class="h-num">2.4</span>지표별 성격 비교</h2>
+    <div class="table-wrap"><table>
+      <tr><th>지표</th><th>중첩</th><th>범위</th><th>무엇에 민감한가</th><th>논문에서의 용도</th></tr>
+      <tr><td>RMSD</td><td>필요</td><td>0 → ∞ Å</td><td>큰 오차 몇 개, 도메인 배치</td><td>—</td></tr>
+      <tr><td>r.m.s.d.<sub>95</sub></td><td>필요(반복)</td><td>0 → ∞ Å</td><td>RMSD보다 결정 구조 인공물에 강건</td><td>CASP14 헤드라인, Fig. 2a</td></tr>
+      <tr><td>GDT_TS</td><td>필요(최대화)</td><td>0–100</td><td>잘 맞는 잔기의 비율</td><td>CASP 도메인, 절제 실험(Fig. 4a)</td></tr>
+      <tr><td>lDDT(-Cα)</td><td><b>불필요</b></td><td>0–100</td><td>국소 거리 보존, 도메인 분할 불필요</td><td>최근 PDB 평가, pLDDT의 목표값</td></tr>
+      <tr><td>TM-score</td><td>필요(최대화)</td><td>0–1</td><td>전체 폴드 유사성, 길이 정규화</td><td>전체 사슬, pTM(Fig. 2d)</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <h2><span class="h-num">2.5</span>r.m.s.d.<sub>95</sub>는 어떻게 계산하나</h2>
+    <p>Methods의 정의를 그대로 따르면 다음과 같습니다. 위 실험실의 r.m.s.d.<sub>95</sub> 값도 이 절차로 계산합니다.</p>
+    <pre><code><span class="c"># Methods · Metrics</span>
+selected = all Cα atoms
+<span class="k">repeat</span> 5 times:
+    (1) selected 원자로 예측 구조를 실제 구조에 최소제곱 정렬(Kabsch)
+    (2) 정렬 오차가 가장 작은 95%의 Cα를 새 selected로 선택
+r.m.s.d.95 = 마지막 반복에서 선택된 원자들의 RMSD</code></pre>
+    <div class="callout warn"><strong>주의: 5%를 버리는 것의 양면</strong>
+      <p>결정 구조의 인공물(유연한 말단, 결정 접촉)에 의한 “겉보기 오차”에 강건해지지만, 논문 스스로 “in some cases the removed 5% of residues will contain genuine modelling errors”라고 인정합니다.</p></div>
+    <p>최근 PDB 구조 3,144개 사슬(학습 세트와 40% 이상 동일한 템플릿이 없는 경우)에서도 전체 사슬 r.m.s.d.<sub>95</sub> 중앙값은 <b>1.46 Å</b>(95% CI 1.40–1.56 Å)였습니다(Fig. 2a). CASP14의 성능이 우연이 아니었다는 증거입니다.</p>
+  </section>
+
+  <section class="keypoints">
+    <h2>핵심 정리</h2>
+    <ol>
+      <li>CASP는 미공개 실험 구조로 진행하는 블라인드 평가로, 데이터 누출이 없는 진짜 일반화 시험이다.</li>
+      <li>CASP14에서 AlphaFold2의 백본 r.m.s.d.<sub>95</sub> 중앙값은 0.96 Å로, 차순위(2.8 Å)의 약 1/3이며 탄소 원자 지름보다 작다.</li>
+      <li>전원자 정확도도 1.5 Å 대 3.5 Å로 크게 앞섰다.</li>
+      <li>RMSD·GDT·TM은 중첩이 필요하고, lDDT는 중첩 없이 국소 거리 보존을 본다 → 도메인 배치 오차에 강건.</li>
+      <li>최근 PDB 사슬(n = 3,144)에서도 r.m.s.d.<sub>95</sub> 중앙값 1.46 Å로 성능이 재현되었다.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>확인 퀴즈</h2>
+    <div class="quiz">
+      <div class="quiz-q" data-answer="2"><p>Q1. 두 도메인이 각각 완벽히 예측됐지만 상대 각도가 40° 틀렸다. 가장 덜 나빠지는 지표는?</p><div class="opts">
+        <button class="opt">RMSD</button><button class="opt">GDT_TS</button><button class="opt">lDDT-Cα</button><button class="opt">TM-score</button></div>
+        <p class="quiz-exp">lDDT는 15 Å 이내의 국소 거리만 보고 중첩을 하지 않으므로, 도메인 내부가 맞으면 높게 유지됩니다.</p></div>
+      <div class="quiz-q" data-answer="1"><p>Q2. 논문이 0.96 Å라는 숫자를 “탄소 원자 지름(~1.4 Å)”과 비교한 의도는?</p><div class="opts">
+        <button class="opt">AlphaFold2가 원자를 직접 관찰한다는 뜻</button><button class="opt">오차가 원자 하나 크기보다 작다는, 원자 수준 정확도를 강조</button><button class="opt">탄소 원자만 예측한다는 뜻</button><button class="opt">X선 해상도가 1.4 Å라는 뜻</button></div>
+        <p class="quiz-exp">평균적인 Cα 위치 오차가 원자 하나 크기보다 작다는 직관적 비교입니다.</p></div>
+      <div class="quiz-q" data-answer="3"><p>Q3. r.m.s.d.<sub>95</sub>의 계산 절차로 옳은 것은?</p><div class="opts">
+        <button class="opt">가장 오차가 큰 5%만 골라 RMSD를 계산</button><button class="opt">무작위로 95%를 뽑아 RMSD 평균</button><button class="opt">Cα 대신 모든 원자의 95%를 사용</button><button class="opt">정렬과 하위 95% 선택을 5회 반복한 뒤 선택 원자로 RMSD 계산</button></div>
+        <p class="quiz-exp">Methods: 5회 반복으로 (1) 최소제곱 정렬, (2) 정렬 오차가 가장 작은 95% Cα 선택.</p></div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

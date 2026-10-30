@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>03 MSA와 공진화 · FoldBook</title>
+<link rel="stylesheet" href="../css/style.css">
+<link rel="icon" href="../favicon.svg">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+<script src="../data/proteins.js" defer></script>
+<script src="../js/common.js" defer></script>
+<script src="../js/ch3.js" defer></script>
+</head>
+<body>
+<main class="chapter">
+  <header class="chapter-hero">
+    <div class="eyebrow">Chapter 03</div>
+    <h1>MSA와 공진화</h1>
+    <p class="lead">AlphaFold2는 서열 하나만 보지 않습니다. 진화적으로 친척인 수천 개의 서열을 정렬한 <b>다중 서열 정렬(MSA)</b>을 함께 읽습니다. 3차원에서 맞닿은 잔기들은 진화 과정에서 함께 변이한다는 사실 — <b>공진화</b> — 이 구조의 단서가 됩니다.</p>
+    <ul class="objectives">
+      <li>MSA가 무엇이고 AlphaFold2가 어떤 데이터베이스에서 이를 만드는지 설명할 수 있다.</li>
+      <li>공진화 신호로부터 잔기 간 접촉을 추론하는 원리를 직접 실험한다.</li>
+      <li>MSA 깊이(N<sub>eff</sub>)가 정확도에 미치는 “문턱 효과”를 이해한다.</li>
+      <li>AlphaFold2가 손으로 만든 공진화 통계 대신 원시 MSA를 쓰는 이유를 안다.</li>
+    </ul>
+    <p class="paper-ref">관련 원문: <b>Main</b> · <b>Methods: Inputs and data sources</b> · <b>Fig. 5a</b></p>
+  </header>
+
+  <section>
+    <h2><span class="h-num">3.1</span>다중 서열 정렬(MSA)</h2>
+    <p>입력 서열(query)과 비슷한 서열을 거대한 서열 DB에서 찾아 열(column)을 맞춰 쌓은 표가 MSA입니다. 각 <b>열은 하나의 잔기 위치</b>, 각 <b>행은 하나의 생물종(또는 상동 단백질)</b>입니다. AlphaFold2의 MSA 표현 텐서 \((N_{seq}\times N_{res}\times c_m)\)도 정확히 이 모양을 따릅니다.</p>
+    <figure class="diagram">
+      <svg viewBox="0 0 860 250" role="img" aria-label="MSA와 공진화의 예">
+        <g font-family="var(--mono)" font-size="15">
+          <text x="20" y="40" class="t-dim">query</text><text x="20" y="72" class="t-dim">종 A</text><text x="20" y="104" class="t-dim">종 B</text><text x="20" y="136" class="t-dim">종 C</text><text x="20" y="168" class="t-dim">종 D</text>
+          <rect x="226" y="22" width="26" height="160" rx="6" class="f-acc-soft"/>
+          <rect x="406" y="22" width="26" height="160" rx="6" class="f-acc-soft"/>
+          <rect x="316" y="22" width="26" height="160" rx="6" class="f-warn-soft"/>
+          <text x="100" y="40" class="t" letter-spacing="13.2">MKVLAEGKLSFRV</text>
+          <text x="100" y="72" class="t" letter-spacing="13.2">MKILAKGKISFEV</text>
+          <text x="100" y="104" class="t" letter-spacing="13.2">MRVLDEGRLGFRI</text>
+          <text x="100" y="136" class="t" letter-spacing="13.2">MKVIARGKLSFEV</text>
+          <text x="100" y="168" class="t" letter-spacing="13.2">MKVLDKGKVAFRV</text>
+        </g>
+        <text x="239" y="205" text-anchor="middle" class="t-acc">i</text>
+        <text x="419" y="205" text-anchor="middle" class="t-acc">j</text>
+        <text x="329" y="205" text-anchor="middle" class="t-dim">보존</text>
+        <path d="M239 212 C260 240, 400 240, 419 212" class="s-acc" stroke-dasharray="4 4"/>
+        <text x="329" y="246" text-anchor="middle" class="t-acc">E↔R, K↔E: 전하가 함께 뒤바뀜</text>
+        <g transform="translate(560,30)">
+          <rect width="280" height="180" rx="14" class="f-elev"/>
+          <path d="M40 140 C30 60, 120 40, 140 90 S230 150, 240 60" class="s-line" stroke-width="5"/>
+          <circle cx="75" cy="62" r="13" fill="#ef4444" opacity=".85"/><text x="75" y="67" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">−</text>
+          <circle cx="101" cy="62" r="13" fill="#3b82f6" opacity=".85"/><text x="101" y="67" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">+</text>
+          <text x="88" y="36" text-anchor="middle" class="t-dim">i와 j는 3D에서 접촉</text>
+          <text x="140" y="168" text-anchor="middle" class="t-dim">한쪽이 변하면 다른 쪽도 보상 변이</text>
+        </g>
+      </svg>
+      <figcaption><b>그림 3-1.</b> 공진화의 원리. 위치 i와 j가 3D에서 염다리를 이루면, 한쪽의 전하가 뒤집히는 변이는 다른 쪽도 함께 뒤집혀야 살아남습니다. 그 결과 MSA의 두 열 사이에 통계적 상관이 남습니다. (예시 서열은 설명용)</figcaption>
+    </figure>
+    <h3>AlphaFold2가 검색하는 데이터베이스</h3>
+    <div class="table-wrap"><table>
+      <tr><th>용도</th><th>데이터베이스</th><th>검색 도구</th></tr>
+      <tr><td>MSA</td><td>UniRef90 v2020_01</td><td>jackhmmer (HMMER3)</td></tr>
+      <tr><td>MSA</td><td>BFD + Uniclust30 v2018_08</td><td>HHBlits</td></tr>
+      <tr><td>MSA</td><td>MGnify v2018_12 (메타게놈)</td><td>jackhmmer</td></tr>
+      <tr><td>템플릿</td><td>PDB70 (2020-05-13)</td><td>HHSearch</td></tr>
+    </table></div>
+    <p>논문이 새로 만든 <b>BFD</b><span class="en">(Big Fantastic Database)</span>는 UniProt·토양·해양 메타게놈 서열 24억 개를 30% 동일성으로 클러스터링해 <b>65,983,866개 패밀리, 2,204,359,010개 서열</b>을 담은, 공개된 것 중 가장 큰 단백질 패밀리 모음 중 하나입니다.</p>
+  </section>
+
+  <section>
+    <h2><span class="h-num">3.2</span>공진화에서 접촉 지도로</h2>
+    <p>두 열 i, j의 공진화 강도를 재는 가장 단순한 방법은 <b>상호정보량</b>(mutual information)입니다. 실제로는 계통 편향과 엔트로피 효과를 줄이기 위해 <b>APC</b>(average product correction)를 적용합니다.</p>
+    <div class="formula">$$\mathrm{MI}_{ij} = \sum_{a,b} f_{ij}(a,b)\,\log\frac{f_{ij}(a,b)}{f_i(a)\,f_j(b)},\qquad \mathrm{MI}^{\text{APC}}_{ij} = \mathrm{MI}_{ij} - \frac{\overline{\mathrm{MI}}_{i\cdot}\;\overline{\mathrm{MI}}_{\cdot j}}{\overline{\mathrm{MI}}}$$
+      <div class="where">\(f_i(a)\): 열 i에서 아미노산 a의 빈도, \(f_{ij}(a,b)\): 쌍 빈도. 점수가 높은 쌍을 접촉으로 예측합니다. (DCA·PSICOV 같은 고전 방법은 간접 상관을 제거하는 전역 모델을 씁니다.)</div></div>
+
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag">SIMULATOR</span><h3>공진화 시뮬레이터: 서열을 진화시키고 접촉을 맞혀라</h3></div>
+      <div class="sim-view"><canvas id="coCv"></canvas></div>
+      <div class="legend"><span><i style="background:#9aa6bf"></i>실제 접촉 (아래 삼각형)</span><span><i style="background:var(--ok)"></i>맞힌 예측</span><span><i style="background:var(--bad)"></i>틀린 예측</span><span>위 삼각형 = MI-APC 점수</span></div>
+      <div class="sim-controls">
+        <label class="ctrl"><span>MSA 서열 수 N<sub>seq</sub> <output></output></span><input type="range" id="coN" min="0" max="30" value="18"></label>
+        <label class="ctrl"><span>결합 세기 (선택압) <output></output></span><input type="range" id="coJ" min="0" max="3" step="0.1" value="1.6"></label>
+        <label class="ctrl"><span>무관한 서열 비율 <output></output></span><input type="range" id="coNoise" min="0" max="0.8" step="0.05" value="0.1"></label>
+        <div class="ctrl-row"><button class="btn" id="coRe">다시 샘플링</button><button class="btn primary" id="coSweep">깊이 스윕 실행</button></div>
+      </div>
+      <div class="sim-readout">
+        <div class="stat"><span class="k">N<sub>seq</sub></span><span class="v" id="coNs">—</span></div>
+        <div class="stat"><span class="k">N<sub>eff</sub> (80% 가중)</span><span class="v" id="coNeff">—</span></div>
+        <div class="stat"><span class="k">상위 L/2 정밀도</span><span class="v" id="coPrec">—</span></div>
+        <div class="stat"><span class="k">실제 장거리 접촉</span><span class="v" id="coTrue">—</span></div>
+      </div>
+      <div class="sim-view" style="border-top:1px solid var(--border)"><canvas id="sweepCv"></canvas></div>
+      <div class="sim-note">“실제 구조”는 리소자임 C의 41–88번 잔기(β-시트 도메인, AlphaFold DB)의 Cα 접촉(&lt; 8 Å, |i−j| ≥ 6)입니다. 서열은 4-문자 알파벳(H 소수성 · P 극성 · + · −)의 Potts 모델에서 깁스 샘플링으로 생성하며, 접촉 쌍에만 결합(H–H, +–−, P–P 선호)을 넣습니다. 정밀도는 MI-APC 상위 L/2개의 장거리 예측 중 실제 접촉의 비율입니다.</div>
+    </div>
+    <p class="tryit"><b>해볼 것:</b> ① N<sub>seq</sub>를 10 이하로 내리면 위 삼각형이 잡음뿐입니다. ② 100, 1000으로 올리며 접촉 패턴(β-가닥 쌍의 대각선 줄무늬)이 떠오르는 순간을 찾으세요. ③ <b>깊이 스윕</b>을 눌러 정밀도–깊이 곡선을 그려 보세요. 일정 깊이를 넘으면 급상승하고, 그 뒤엔 포화하는 <b>문턱 효과</b>가 보입니다. ④ 결합 세기를 0으로 두면 아무리 깊어도 신호가 없습니다 — 구조적 제약이 없으면 공진화도 없습니다.</p>
+  </section>
+
+  <section>
+    <h2><span class="h-num">3.3</span>MSA 깊이와 AlphaFold2의 정확도</h2>
+    <p>논문 Fig. 5a는 최근 PDB 사슬에서 MSA 깊이(N<sub>eff</sub> 중앙값)와 lDDT-Cα의 관계를 보여줍니다. 결론은 위 장난감 실험과 놀랍도록 비슷합니다.</p>
+    <div class="callout paper"><strong>MSA depth and cross-chain contacts</strong>
+      <blockquote>“The model uses MSAs and the accuracy decreases substantially when the median alignment depth is less than around 30 sequences … improvements in MSA depth over around 100 sequences lead to small gains.”</blockquote></div>
+    <p>저자들의 해석은 흥미롭습니다: <b>MSA 정보는 네트워크 초반에 대략적인 폴드를 “찾는” 데 필요하지만, 그것을 고정밀 모델로 다듬는 단계는 MSA에 크게 의존하지 않는다.</b> 8장의 블록별 궤적 실험과 연결되는 가설입니다.</p>
+    <div class="callout tip"><strong>N<sub>eff</sub>란?</strong>
+      <p>비슷한 서열이 1,000개 있어도 거의 같은 서열이라면 정보는 1개 분량입니다. 그래서 서열 동일성 80% 이상인 이웃 수의 역수로 각 서열에 가중치를 주어 합한 <b>유효 서열 수</b>를 씁니다. 논문은 각 위치의 비-갭 잔기에 대해 이를 계산하고 중앙값을 취했습니다.</p></div>
+  </section>
+
+  <section>
+    <h2><span class="h-num">3.4</span>메타게놈 데이터가 결정적인 이유</h2>
+    <p>Methods에서 저자들은 CASP14 단백질을 MSA 구성만 바꿔 다시 예측했습니다(평균 GDT 변화).</p>
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag data">REAL NUMBERS</span><h3>서열 DB 제거 실험 (CASP14, 평균 GDT 변화)</h3></div>
+      <div class="sim-view"><canvas id="dbCv"></canvas></div>
+      <div class="sim-note">출처: Methods “Inputs and data sources”. 대부분의 표적은 변화가 매우 작았지만 일부는 20 GDT 이상 차이가 났습니다. 두 메타게놈 DB의 효과는 대체로 겹치지만, 둘 다 없으면 UniRef에 잘 대표되지 않는 표적 군에서 크게 무너집니다.</div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="h-num">3.5</span>원시 MSA를 그대로 넣는다</h2>
+    <p>AlphaFold1(CASP13)과 당시 대부분의 방법은 MSA에서 공분산·DCA 같은 <b>손으로 설계한 통계</b>를 뽑아 CNN에 넣었습니다. AlphaFold2는 <b>정렬된 서열 자체</b>를 MSA 표현으로 넣고, 어떤 상관을 볼지 네트워크가 학습하게 합니다. 이를 돕는 것이 BERT식 마스크 MSA 손실(6장)입니다.</p>
+    <div class="callout paper"><strong>Training with labelled and unlabelled data</strong>
+      <blockquote>“This objective encourages the network to learn to interpret phylogenetic and covariation relationships without hardcoding a particular correlation statistic into the features.”</blockquote></div>
+    <p>8장의 절제 실험 목록에는 “No raw MSA (use MSA pairwise frequencies)” 변형이 있으며, 원시 MSA를 쌍 빈도로 대체하면 정확도가 떨어집니다. 또한 매우 깊은 MSA는 계산량 때문에 <b>클러스터 중심</b> 서열만 주 MSA 스택에 넣고, 나머지는 가벼운 <b>Extra MSA 스택</b>으로 요약합니다(Supplementary 1.2.7).</p>
+  </section>
+
+  <section class="keypoints">
+    <h2>핵심 정리</h2>
+    <ol>
+      <li>MSA는 진화적 친척 서열의 정렬이며, AlphaFold2의 MSA 표현은 그 (서열 × 잔기) 격자를 그대로 따른다.</li>
+      <li>3D 접촉 잔기는 함께 변이하므로(공진화) MSA 열 간 상관에서 접촉을 추론할 수 있다.</li>
+      <li>공진화 신호는 충분한 유효 서열 수가 있어야 드러난다 — AlphaFold2는 N<sub>eff</sub> ≈ 30 미만에서 정확도가 크게 떨어지고 ≈ 100 이상에선 이득이 작다.</li>
+      <li>BFD·MGnify 같은 메타게놈 DB를 모두 빼면 CASP14 평균 GDT가 6.1 떨어졌다.</li>
+      <li>AlphaFold2는 손으로 만든 통계 대신 원시 MSA를 넣고, 상관을 해석하는 법을 스스로 학습한다.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>확인 퀴즈</h2>
+    <div class="quiz">
+      <div class="quiz-q" data-answer="0"><p>Q1. MSA에서 두 열이 강하게 공변하는 가장 그럴듯한 구조적 이유는?</p><div class="opts">
+        <button class="opt">두 잔기가 3D 공간에서 접촉해 서로의 변이를 보상한다</button><button class="opt">두 잔기가 서열상 인접해 있다</button><button class="opt">두 잔기가 모두 글라이신이다</button><button class="opt">정렬 알고리즘의 오류이다</button></div>
+        <p class="quiz-exp">접촉한 잔기 쌍은 구조·기능을 유지하려면 함께 변해야 하므로 통계적 상관이 남습니다.</p></div>
+      <div class="quiz-q" data-answer="2"><p>Q2. 논문 Fig. 5a에 따르면 AlphaFold2 정확도가 크게 떨어지는 MSA 깊이는 대략?</p><div class="opts">
+        <button class="opt">N<sub>eff</sub> &lt; 1,000</button><button class="opt">N<sub>eff</sub> &lt; 300</button><button class="opt">N<sub>eff</sub> &lt; 30</button><button class="opt">깊이와 무관하다</button></div>
+        <p class="quiz-exp">“accuracy decreases substantially when the median alignment depth is less than around 30 sequences.”</p></div>
+      <div class="quiz-q" data-answer="1"><p>Q3. CASP14에서 BFD와 MGnify를 둘 다 제거했을 때 평균 GDT 감소량은?</p><div class="opts">
+        <button class="opt">0.4</button><button class="opt">6.1</button><button class="opt">0.7</button><button class="opt">20 이상</button></div>
+        <p class="quiz-exp">BFD만 제거: −0.4, MGnify만: −0.7, 둘 다: −6.1. 일부 표적은 20 GDT 이상 바뀌었습니다.</p></div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

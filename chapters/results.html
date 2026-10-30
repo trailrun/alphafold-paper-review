@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>08 결과·해석·한계 · FoldBook</title>
+<link rel="stylesheet" href="../css/style.css">
+<link rel="icon" href="../favicon.svg">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+<script src="../js/common.js" defer></script>
+<script src="../js/ch8.js" defer></script>
+</head>
+<body>
+<main class="chapter">
+  <header class="chapter-hero">
+    <div class="eyebrow">Chapter 08</div>
+    <h1>결과·해석·한계</h1>
+    <p class="lead">CASP14의 헤드라인 숫자 너머, 논문은 세 가지를 더 보여줍니다: 최근 PDB 전체에서의 일반화, 네트워크 <b>내부</b>에서 구조가 만들어지는 과정, 그리고 모델이 실패하는 조건. 리뷰어의 눈으로 이 증거들을 하나씩 따져 봅니다.</p>
+    <ul class="objectives">
+      <li>최근 PDB 평가(Fig. 2)와 측쇄 정확도 결과를 해석할 수 있다.</li>
+      <li>블록별 중간 구조 궤적(Fig. 4b)이 네트워크 깊이의 역할에 대해 말해 주는 것을 이해한다.</li>
+      <li>절제 실험(Fig. 4a)의 설계와 각 변형이 무엇을 제거했는지 설명할 수 있다.</li>
+      <li>추론 비용과 논문이 명시한 한계, 그리고 이후 제기된 한계를 구분할 수 있다.</li>
+    </ul>
+    <p class="paper-ref">관련 원문: <b>Fig. 2</b> · <b>Fig. 4</b> · <b>Fig. 5</b> · <b>Interpreting the neural network</b> · <b>Methods: Inference regimen</b> · <b>Discussion</b></p>
+  </header>
+
+  <section>
+    <h2><span class="h-num">8.1</span>CASP를 넘어: 최근 PDB 구조 평가</h2>
+    <p>CASP14는 표적이 87개 도메인뿐입니다. 저자들은 학습 데이터 마감(2018-04-30) 이후 공개된 PDB 구조로 별도 테스트 세트를 만들었습니다: 중복 제거(40% 클러스터), 16개 미만 잔기·NMR·1,400 잔기 초과 제외 등의 필터 후 <b>10,795개 사슬</b>.</p>
+    <div class="table-wrap"><table>
+      <tr><th>그림</th><th>내용</th><th>핵심 숫자</th></tr>
+      <tr><td>Fig. 2a</td><td>전체 사슬 백본 r.m.s.d.<sub>95</sub> 히스토그램 (40% 이상 동일 템플릿 제외)</td><td class="num">n = 3,144 · 중앙값 1.46 Å</td></tr>
+      <tr><td>Fig. 2b</td><td>백본 정확도(lDDT-Cα)와 측쇄 χ 정확도의 관계 (해상도 &lt; 2.5 Å)</td><td class="num">n = 5,317 · 회전이성질체 정답 = ±40°</td></tr>
+      <tr><td>Fig. 2c</td><td>pLDDT vs 실제 lDDT-Cα</td><td class="num">기울기 0.997 · r = 0.76</td></tr>
+      <tr><td>Fig. 2d</td><td>pTM vs 실제 TM-score</td><td class="num">기울기 0.98 · r = 0.85</td></tr>
+    </table></div>
+    <p>Supplementary 1.15는 이 높은 정확도가 <b>새로운 폴드</b>에도 유지됨을 확인합니다. 즉, 학습 데이터의 비슷한 구조를 “기억해서 복사”하는 것이 아닙니다.</p>
+    <div class="callout"><strong>측쇄는 백본이 맞을 때 따라온다</strong>
+      <p>Fig. 2b의 메시지는 “AlphaFold is able to produce highly accurate side chains when the backbone is highly accurate”입니다. 백본 lDDT-Cα가 높은 구간에서 χ<sub>1</sub> 정답률이 크게 오릅니다 — 5장의 “프레임이 곁사슬 위치를 강하게 제약한다”는 설계와 일관됩니다.</p></div>
+  </section>
+
+  <section>
+    <h2><span class="h-num">8.2</span>네트워크 안을 들여다보기: 블록별 궤적</h2>
+    <p>저자들은 본 네트워크를 고정한 채, 48개 Evoformer 블록 <b>각각의 출력에</b> 별도의 Structure Module을 학습시켰습니다. 재활용 4회 × 48 블록 = <b>192개의 중간 구조</b>가 생기고, 각각은 “그 블록 시점에서 네트워크가 믿는 가장 그럴듯한 구조”입니다.</p>
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag">CONCEPT</span><h3>쉬운 표적 vs 어려운 표적의 정확도 궤적</h3></div>
+      <div class="sim-view"><canvas id="trCv"></canvas></div>
+      <div class="sim-controls">
+        <label class="ctrl"><span>블록 (재활용 포함) <output></output></span><input type="range" id="trB" min="0" max="192" value="60"></label>
+        <div class="ctrl-row"><button class="btn primary" id="trPlay">▶ 재생</button></div>
+      </div>
+      <div class="sim-readout">
+        <div class="stat"><span class="k">재활용 · 블록</span><span class="v" id="trPos">—</span></div>
+        <div class="stat"><span class="k">쉬운 표적 (LmrP 유형)</span><span class="v" id="trE">—</span></div>
+        <div class="stat"><span class="k">어려운 표적 (ORF8 유형)</span><span class="v" id="trH">—</span></div>
+      </div>
+      <div class="sim-note">⚠ 논문 Fig. 4b의 <b>질적 패턴</b>을 재현한 개념도이며 실제 측정값이 아닙니다. 논문 서술: LmrP(T1024)의 두 도메인은 “obtain the correct structure early in the network”, ORF8(T1064)은 “changes multiple times and requires nearly the full depth of the network”. 세로 점선 = 재활용 경계(48블록마다).</div>
+    </div>
+    <div class="callout paper"><strong>Interpreting the neural network</strong>
+      <blockquote>“The resulting trajectories are surprisingly smooth after the first few blocks, showing that AlphaFold makes constant incremental improvements to the structure until it can no longer improve.”</blockquote></div>
+    <p>이 실험은 두 가지를 시사합니다. ① 구조에 대한 <b>구체적 가설이 네트워크 초반에 생기고 계속 다듬어진다</b>. ② 어려운 표적에서는 이차 구조 요소를 여러 층에 걸쳐 <b>탐색·재배치</b>하므로, 네트워크 깊이와 재활용이 실제로 쓰인다. Supplementary Video 1–4가 T1024, T1044, T1064, T1091의 궤적을 보여줍니다.</p>
+  </section>
+
+  <section>
+    <h2><span class="h-num">8.3</span>절제 실험: 무엇이 정말 중요한가</h2>
+    <p>Fig. 4a는 구성 요소를 하나씩 빼고 다시 학습한 모델들을 두 테스트 세트(CASP14 87개 도메인의 GDT, 템플릿 커버리지가 낮은 최근 PDB 2,261개 사슬의 lDDT-Cα)에서 기준 모델(시드 3개 평균) 대비 차이로 보고합니다. 카드를 눌러 각 변형이 무엇을 제거했는지 확인하세요.</p>
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag">EXPLORER</span><h3>Fig. 4a 절제 변형 탐색기</h3></div>
+      <div class="cards" id="abl" style="padding:16px 18px;grid-template-columns:repeat(auto-fill,minmax(230px,1fr))"></div>
+      <div class="sim-note" id="ablInfo">카드를 선택하세요.</div>
+    </div>
+    <div class="callout warn"><strong>리뷰어 메모: 절제 결과를 읽을 때</strong>
+      <p>논문 본문은 “a variety of different mechanisms contribute to AlphaFold accuracy”라고 요약하고, 정량적 크기는 Fig. 4a와 Supplementary 1.13에 맡깁니다. 정확한 효과 크기는 원 그림을 직접 확인하세요. 또한 MSA 깊이에 따라 절제 효과가 달라진다는 분석(Supplementary Fig. 10)이 있어, “평균 효과가 작다 = 중요하지 않다”로 읽으면 안 됩니다.</p></div>
+  </section>
+
+  <section>
+    <h2><span class="h-num">8.4</span>추론 비용</h2>
+    <p>AlphaFold2는 좌표를 직접 출력하므로 분자동역학처럼 수일씩 시뮬레이션할 필요가 없습니다. Methods가 보고한 단일 모델·V100 GPU 기준 시간입니다.</p>
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag data">REAL NUMBERS</span><h3>추론 시간과 메모리 계산기</h3></div>
+      <div class="sim-view"><canvas id="infCv"></canvas></div>
+      <div class="sim-controls">
+        <label class="ctrl"><span>잔기 수 N<sub>res</sub> <output></output></span><input type="range" id="infN" min="50" max="2700" step="10" value="384"></label>
+      </div>
+      <div class="sim-readout">
+        <div class="stat"><span class="k">쌍 표현 크기 (fp32)</span><span class="v" id="infPair">—</span></div>
+        <div class="stat"><span class="k">삼각형 곱셈 연산 (블록당)</span><span class="v" id="infTri">—</span></div>
+        <div class="stat"><span class="k">추정 시간 (앙상블 없음)</span><span class="v" id="infT">—</span></div>
+        <div class="stat"><span class="k">V100 16 GB 단일 GPU</span><span class="v" id="infFit">—</span></div>
+      </div>
+      <div class="sim-note">점 = 논문 실측값: 앙상블 없음 0.6분(256), 1.1분(384), 2.1시간(2,500) · CASP14 설정(앙상블) 4.8분, 9.2분, 18시간. 앙상블을 끄면 약 8배 빠르고 정확도는 거의 같습니다. 추정 시간은 실측 점들을 잇는 로그-로그 보간이며, 메모리 한계 ≈ 1,300 잔기(앙상블 없음)도 논문 수치입니다. 쌍 표현 크기 = N<sup>2</sup>×128×4 B, 삼각형 연산 = N<sup>3</sup>×128.</div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="h-num">8.5</span>한계: 논문이 말한 것과 이후 알려진 것</h2>
+    <h3>논문이 명시한 한계</h3>
+    <ul>
+      <li><b>얕은 MSA</b>: N<sub>eff</sub> 중앙값이 약 30 미만이면 정확도가 크게 떨어진다(Fig. 5a, 3장).</li>
+      <li><b>이종 접촉이 많은 사슬</b>: 모양이 대부분 다른 사슬과의 상호작용으로 만들어지는 “가교 도메인(bridging domain)”에 약하다. 반면 <b>동종 다량체</b>는 사슬이 서로 얽혀 있어도 잘 맞히곤 한다(Fig. 5b, PDB 6SK0 삼량체).</li>
+      <li><b>펩타이드 결합 위반</b>: 구조 모듈은 사슬 제약을 어길 수 있어 Amber 이완 후처리가 필요(정확도는 바꾸지 않음).</li>
+      <li><b>메모리</b>: N<sub>res</sub><sup>2</sup>에 비례 — 큰 단백질은 통합 메모리·여러 GPU 메모리가 필요.</li>
+    </ul>
+    <h3>논문이 강점으로 든 것</h3>
+    <ul>
+      <li>수소 결합 점수 함수 없이도 수소 결합을 효과적으로 형성.</li>
+      <li>미지의 헴(haem) 같은 보조 인자가 있어야 접히는 단백질, 얽힌 동종 다량체 등 <b>물리적 맥락이 빠진</b> 경우도 처리 — “PDB 구조의 일부로 나타날 가능성이 가장 높은 구조”를 예측하도록 학습되었기 때문.</li>
+      <li>분자 치환(molecular replacement)과 cryo-EM 지도 해석에 이미 활용됨.</li>
+    </ul>
+    <h3>이후 커뮤니티가 지적한 한계 <span class="cite">(리뷰어 정리 · 논문 외 내용)</span></h3>
+    <div class="callout warn"><strong>“구조 예측”은 “접힘 과정”의 해결이 아니다</strong>
+      <p>AlphaFold2는 정적인 단일 구조를 출력할 뿐, 접힘 경로·동역학·여러 형태(conformational ensemble)를 직접 모델링하지 않습니다. 점 돌연변이의 효과 예측, 리간드·핵산과의 복합체, 번역 후 변형 등은 원 모델의 범위 밖이며, AlphaFold-Multimer(2021)와 AlphaFold 3(2024)가 일부를 확장했습니다.</p></div>
+  </section>
+
+  <section class="keypoints">
+    <h2>핵심 정리</h2>
+    <ol>
+      <li>최근 PDB 10,795개 사슬 평가에서도 높은 정확도가 재현됐다(템플릿 제외 3,144개 사슬 r.m.s.d.<sub>95</sub> 중앙값 1.46 Å).</li>
+      <li>블록별 구조 모듈로 만든 192개 중간 구조는 구조 가설이 초반에 생겨 점진적으로 정제됨을 보여준다.</li>
+      <li>어려운 표적(ORF8)은 네트워크 거의 전체 깊이가 필요하고, 쉬운 표적(LmrP)은 초반에 답을 찾는다.</li>
+      <li>절제 실험은 단일 “비법”이 아니라 여러 메커니즘이 함께 정확도를 만든다는 것을 보여준다.</li>
+      <li>앙상블 없는 추론은 384 잔기에 약 1.1분(V100); 메모리는 N<sup>2</sup>에 비례.</li>
+      <li>주요 한계: 얕은 MSA, 이종 접촉 위주의 사슬, 정적인 단일 구조 출력.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>확인 퀴즈</h2>
+    <div class="quiz">
+      <div class="quiz-q" data-answer="1"><p>Q1. 192개의 중간 구조는 어떻게 얻었나?</p><div class="opts">
+        <button class="opt">학습 중 192번의 체크포인트를 저장했다</button><button class="opt">네트워크를 고정하고 각 Evoformer 블록 출력에 별도 Structure Module을 학습했다(48블록 × 4회 재활용)</button><button class="opt">Structure Module 8층 × 24개 모델</button><button class="opt">MSA 서열 192개를 각각 입력했다</button></div>
+        <p class="quiz-exp">“we trained a separate structure module for each of the 48 Evoformer blocks in the network while keeping all parameters of the main network frozen.”</p></div>
+      <div class="quiz-q" data-answer="3"><p>Q2. 논문이 AlphaFold2의 약점으로 명시한 경우는?</p><div class="opts">
+        <button class="opt">얽힌 동종 삼량체</button><button class="opt">2,000 잔기 이상의 단일 사슬</button><button class="opt">헴이 있어야 접히는 단백질</button><button class="opt">대부분의 접촉이 다른 사슬과의 이종 접촉인 가교 도메인</button></div>
+        <p class="quiz-exp">“AlphaFold is much weaker for proteins that have few intra-chain or homotypic contacts compared to the number of heterotypic contacts.”</p></div>
+      <div class="quiz-q" data-answer="0"><p>Q3. CASP14 설정의 앙상블을 끄면?</p><div class="opts">
+        <button class="opt">약 8배 빨라지고 정확도는 거의 같다</button><button class="opt">정확도가 크게 떨어진다</button><button class="opt">메모리가 8배 늘어난다</button><button class="opt">pLDDT를 계산할 수 없다</button></div>
+        <p class="quiz-exp">“the accuracy of the network without ensembling is very close or equal … Without ensembling, the network is 8× faster.”</p></div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

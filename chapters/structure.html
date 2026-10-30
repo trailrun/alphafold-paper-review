@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>05 Structure Module · FoldBook</title>
+<link rel="stylesheet" href="../css/style.css">
+<link rel="icon" href="../favicon.svg">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+<script src="../data/proteins.js" defer></script>
+<script src="../js/common.js" defer></script>
+<script src="../js/ch5.js" defer></script>
+</head>
+<body>
+<main class="chapter">
+  <header class="chapter-hero">
+    <div class="eyebrow">Chapter 05</div>
+    <h1>Structure Module과 IPA</h1>
+    <p class="lead">Evoformer가 만든 추상적 표현을 <b>실제 3D 좌표</b>로 바꾸는 단계입니다. 단백질을 사슬이 아니라 서로 독립적으로 떠다니는 강체들의 <b>“잔기 기체(residue gas)”</b>로 보고, 회전·평행이동에 불변인 <b>Invariant Point Attention(IPA)</b>으로 8번 반복해 다듬습니다.</p>
+    <ul class="objectives">
+      <li>백본 강체 프레임 \(T_i=(R_i,\mathbf{t}_i)\)을 N, Cα, C 원자로부터 만들 수 있다.</li>
+      <li>IPA의 어텐션 가중치가 전역 회전·평행이동에 불변인 이유를 수식과 실험으로 확인한다.</li>
+      <li>“사슬을 끊는” 표현이 왜 반복 정제에 유리한지 설명할 수 있다.</li>
+      <li>비틀림각으로 곁사슬 원자를 복원하는 방식을 이해한다.</li>
+    </ul>
+    <p class="paper-ref">관련 원문: <b>End-to-end structure prediction</b> · <b>Fig. 3d–e</b> · <b>Methods: IPA</b> · Supplementary 1.8</p>
+  </header>
+
+  <section>
+    <h2><span class="h-num">5.1</span>입력과 출력</h2>
+    <figure class="diagram">
+      <svg viewBox="0 0 860 260" role="img" aria-label="Structure Module 구조">
+        <defs><marker id="a6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0L10,5L0,10z" fill="var(--text-dim)"/></marker></defs>
+        <rect x="10" y="30" width="150" height="60" rx="10" class="f-acc-soft"/><text x="85" y="56" text-anchor="middle" class="t">단일 표현 s_i</text><text x="85" y="74" text-anchor="middle" class="t-mono">(r, 384) · MSA 첫 행</text>
+        <rect x="10" y="120" width="150" height="60" rx="10" class="f-acc2-soft"/><text x="85" y="146" text-anchor="middle" class="t">쌍 표현 z_ij</text><text x="85" y="164" text-anchor="middle" class="t-mono">(r, r, 128)</text>
+        <rect x="10" y="200" width="150" height="50" rx="10" class="f-surface"/><text x="85" y="222" text-anchor="middle" class="t">프레임 T_i 초기값</text><text x="85" y="240" text-anchor="middle" class="t-mono">R=I, t=0 (원점)</text>
+        <rect x="210" y="20" width="430" height="230" rx="14" class="f-elev"/>
+        <text x="425" y="44" text-anchor="middle" class="t-b">× 8 층 (가중치 공유)</text>
+        <rect x="230" y="60" width="120" height="60" rx="10" class="f-warn-soft"/><text x="290" y="86" text-anchor="middle" class="t">IPA</text><text x="290" y="104" text-anchor="middle" class="t-mono">s, z, T 사용</text>
+        <rect x="370" y="60" width="110" height="60" rx="10" class="f-surface"/><text x="425" y="94" text-anchor="middle" class="t">전이(MLP)</text>
+        <rect x="500" y="60" width="125" height="60" rx="10" class="f-ok-soft"/><text x="562" y="86" text-anchor="middle" class="t">백본 업데이트</text><text x="562" y="104" text-anchor="middle" class="t-mono">T_i ← T_i ∘ ΔT_i</text>
+        <path d="M350 90h18M480 90h18" class="s-line" marker-end="url(#a6)"/>
+        <path d="M562 120 C562 170, 290 170, 290 122" class="s-acc" stroke-dasharray="5 4" marker-end="url(#a6)"/>
+        <text x="425" y="168" text-anchor="middle" class="t-acc">갱신된 프레임으로 다음 층 IPA</text>
+        <rect x="230" y="190" width="395" height="44" rx="10" class="f-surface"/><text x="427" y="217" text-anchor="middle" class="t">보조 손실: 매 층 FAPE (중간 구조도 감독)</text>
+        <path d="M160 60h48M160 150h48M160 225h48" class="s-line" marker-end="url(#a6)"/>
+        <rect x="690" y="40" width="160" height="70" rx="10" class="f-ok-soft"/><text x="770" y="68" text-anchor="middle" class="t">비틀림각 ω,φ,ψ,χ1–4</text><text x="770" y="88" text-anchor="middle" class="t-mono">→ 모든 중원자 좌표</text>
+        <rect x="690" y="130" width="160" height="50" rx="10" class="f-acc-soft"/><text x="770" y="160" text-anchor="middle" class="t">pLDDT (잔기별)</text>
+        <rect x="690" y="195" width="160" height="50" rx="10" class="f-surface"/><text x="770" y="225" text-anchor="middle" class="t">Amber 이완 (후처리)</text>
+        <path d="M640 80h48M640 155h48" class="s-line" marker-end="url(#a6)"/>
+      </svg>
+      <figcaption><b>그림 5-1.</b> Structure Module(원 논문 Fig. 3d 재구성). 모든 잔기 프레임은 <b>항등 회전, 원점 위치</b>에서 시작해(“black hole initialization”) 8개 층을 거치며 정확한 구조로 펼쳐집니다.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2><span class="h-num">5.2</span>잔기 기체: 사슬을 끊어라</h2>
+    <p>각 잔기의 백본(N–Cα–C)은 거의 강체입니다. 그래서 잔기 i를 하나의 <b>강체 프레임</b> \(T_i=(R_i\in SO(3),\ \mathbf{t}_i\in\mathbb{R}^3)\)으로 표현합니다. 회전 \(R_i\)는 백본의 방향, \(\mathbf{t}_i\)는 Cα 위치입니다. 핵심은 이 프레임들이 <b>서로 연결되어 있지 않다</b>는 것입니다.</p>
+    <div class="callout paper"><strong>End-to-end structure prediction</strong>
+      <blockquote>“the peptide bond geometry is completely unconstrained and the network is observed to frequently violate the chain constraint during the application of the structure module as breaking this constraint enables the local refinement of all parts of the chain without solving complex loop closure problems.”</blockquote></div>
+    <p>사슬로 연결된 표현(예: 비틀림각으로 백본을 생성)에서는 앞쪽 각도 하나만 바꿔도 뒤쪽 전체가 크게 휘두르며 움직입니다(“레버 팔 효과”). 잔기 기체에서는 <b>모든 잔기를 동시에, 국소적으로</b> 고칠 수 있습니다. 펩타이드 결합 기하는 미세조정 단계의 위반 손실과 마지막 Amber 이완으로 맞춥니다.</p>
+    <div class="formula">$$\mathbf{e}_1=\frac{\mathbf{x}_{C}-\mathbf{x}_{C\alpha}}{\lVert\cdot\rVert},\quad \mathbf{u}_2=(\mathbf{x}_{N}-\mathbf{x}_{C\alpha})-\big(\mathbf{e}_1\!\cdot\!(\mathbf{x}_{N}-\mathbf{x}_{C\alpha})\big)\mathbf{e}_1,\quad \mathbf{e}_2=\frac{\mathbf{u}_2}{\lVert\mathbf{u}_2\rVert},\quad \mathbf{e}_3=\mathbf{e}_1\times\mathbf{e}_2$$
+      <div class="where">\(R_i=[\mathbf{e}_1,\mathbf{e}_2,\mathbf{e}_3]\), \(\mathbf{t}_i=\mathbf{x}_{C\alpha}\). 그람–슈미트 과정(Supplementary Algorithm 21).</div></div>
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag">SIMULATOR</span><h3>백본 프레임 만들기 (그람–슈미트)</h3></div>
+      <div class="sim-view"><canvas id="frCv"></canvas><span class="hint">N · Cα · C 원자를 드래그하세요</span></div>
+      <div class="sim-readout">
+        <div class="stat"><span class="k">∠N–Cα–C</span><span class="v" id="frAng">—</span></div>
+        <div class="stat"><span class="k">e₁·e₂ (직교성)</span><span class="v" id="frDot">—</span></div>
+        <div class="stat"><span class="k">e₃ 방향</span><span class="v" id="frE3">—</span></div>
+        <div class="stat"><span class="k">Cβ 국소 좌표</span><span class="v" id="frCb">—</span></div>
+      </div>
+      <div class="sim-note">빨강 e₁, 초록 e₂, e₃는 화면 밖(⊙)/안(⊗) 방향. 보라 점 Cβ는 <b>국소 프레임 안에서 고정된 좌표</b>를 가지므로 프레임과 함께 움직입니다 — “곁사슬 위치는 프레임 안에서 강하게 제약된다”는 논문 문장의 의미입니다.</div>
+    </div>
+    <p class="tryit"><b>해볼 것:</b> ① Cα를 끌어 전체를 옮겨도 Cβ의 국소 좌표는 변하지 않습니다. ② N과 C의 위치를 맞바꾸면 e₃가 뒤집힙니다 — 프레임이 <b>손대칭성(chirality)</b>을 담는 이유입니다. 6장 FAPE가 거울상을 구별하는 원천이 여기 있습니다.</p>
+  </section>
+
+  <section>
+    <h2><span class="h-num">5.3</span>Invariant Point Attention (IPA)</h2>
+    <p>IPA는 일반 어텐션의 쿼리·키·값에 <b>3D 점</b>을 추가합니다. 각 잔기는 자기 <b>국소 프레임 안에서</b> 쿼리 점·키 점·값 점을 만들고, 이를 전역 좌표로 옮긴 뒤 거리로 친밀도를 계산합니다. 세 가지 항이 하나의 어텐션 가중치를 공유합니다.</p>
+    <div class="formula">$$a^h_{ij}=\operatorname{softmax}_j\Big(w_L\Big[\tfrac{1}{\sqrt{c}}\,\mathbf{q}^{h\top}_i\mathbf{k}^h_j \;+\; b^h_{ij} \;-\; \frac{\gamma^h w_C}{2}\sum_{p}\big\lVert T_i\circ\vec{\mathbf{q}}^{\,hp}_i - T_j\circ\vec{\mathbf{k}}^{\,hp}_j\big\rVert^2\Big]\Big)$$
+      <div class="where">① 단일 표현의 내적(추상) ② 쌍 표현 편향 \(b_{ij}\) ③ 3D 점 거리(기하). \(\gamma^h\)는 헤드별 학습 가중치(softplus), \(w_L, w_C\)는 스케일 상수. 출력에는 쌍 표현 값 \(\sum_j a_{ij}z_{ij}\)와 값 점 \(T_i^{-1}\circ\sum_j a_{ij}\,T_j\circ\vec{\mathbf{v}}_j\)도 포함됩니다.</div></div>
+    <div class="callout deep"><strong>왜 불변인가 — 한 줄 증명</strong>
+      <p>모든 프레임에 전역 변환 \(T_g=(R_g,\mathbf{t}_g)\)을 걸면 \(T_g\circ T_i\circ\vec{q}-T_g\circ T_j\circ\vec{k} = R_g\,(T_i\circ\vec{q}-T_j\circ\vec{k})\)이고, 회전은 길이를 보존하므로 거리 항이 그대로입니다. 값 점은 마지막에 \(T_i^{-1}\)로 다시 국소 프레임에 가져오므로 출력도 불변입니다. 단백질을 통째로 돌려도 네트워크의 “생각”은 같습니다.</p></div>
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag">SIMULATOR</span><h3>IPA 불변성 실험실</h3>
+        <div class="seg" id="ipaMode"><button data-v="ipa" class="on">IPA (국소 점)</button><button data-v="naive">비교: 절대 좌표 특징</button></div></div>
+      <div class="sim-body side">
+        <div class="sim-view"><canvas id="ipaCv"></canvas><span class="hint">잔기(삼각형)를 드래그해 상대 배치를 바꿔 보세요</span></div>
+        <div class="sim-controls">
+          <label class="ctrl"><span>전역 회전 θ <output></output></span><input type="range" id="ipaRot" min="-180" max="180" value="0"></label>
+          <label class="ctrl"><span>전역 이동 x <output></output></span><input type="range" id="ipaTx" min="-6" max="6" step="0.1" value="0"></label>
+          <label class="ctrl"><span>γ (기하 항 가중치) <output></output></span><input type="range" id="ipaG" min="0.05" max="1.5" step="0.05" value="0.5"></label>
+          <label class="ctrl"><span>쿼리 잔기 i <output></output></span><input type="range" id="ipaI" min="0" max="6" value="0"></label>
+        </div>
+      </div>
+      <div class="sim-view" style="border-top:1px solid var(--border)"><canvas id="ipaMat"></canvas></div>
+      <div class="sim-readout">
+        <div class="stat"><span class="k">전역 변환 전후 어텐션 최대 변화</span><span class="v" id="ipaDelta">—</span></div>
+        <div class="stat"><span class="k">잔기 i의 최대 어텐션 대상</span><span class="v" id="ipaTop">—</span></div>
+      </div>
+      <div class="sim-note">2D 단순화: 7개 잔기, 헤드 1개, 잔기마다 국소 쿼리 점(파랑)과 키 점(주황) 하나. 어텐션 로짓 = −(γ/2)·‖T<sub>i</sub>∘q − T<sub>j</sub>∘k‖². 비교 모드는 절대 좌표를 그대로 특징으로 넣은 경우(로짓 = (W x<sub>i</sub>)·x<sub>j</sub>, W는 고정된 “학습된” 선형 변환) — 같은 구조인데도 놓인 방향·위치에 따라 값이 달라집니다.</div>
+    </div>
+    <p class="tryit"><b>해볼 것:</b> ① IPA 모드에서 전역 회전·이동 슬라이더를 끝까지 움직여도 아래 어텐션 행렬과 “최대 변화” 값이 0입니다. ② 비교 모드로 바꾸고 같은 실험을 하면 행렬이 요동칩니다. ③ 잔기 하나를 <b>드래그</b>하면(상대 배치 변화) IPA에서도 어텐션이 바뀝니다 — 불변성은 “전역” 변환에만 해당합니다.</p>
+  </section>
+
+  <section>
+    <h2><span class="h-num">5.4</span>등변 백본 업데이트</h2>
+    <p>IPA로 갱신된 단일 표현 \(s_i\)에서 각 잔기가 <b>자기 국소 프레임 기준의</b> 작은 회전·이동 \(\Delta T_i\)를 예측하고 합성합니다.</p>
+    <div class="formula">$$(b_i,c_i,d_i,\mathbf{t}'_i)=\mathrm{Linear}(s_i),\quad \Delta R_i=\mathrm{quat}\!\left(\frac{(1,b_i,c_i,d_i)}{\sqrt{1+b_i^2+c_i^2+d_i^2}}\right),\quad T_i\leftarrow T_i\circ(\Delta R_i,\mathbf{t}'_i)$$
+      <div class="where">갱신이 국소 프레임에서 정의되므로, 입력 구조를 돌리면 출력도 똑같이 돌아갑니다(<b>등변성</b>). 사원수의 실수부를 1로 고정해 항등 변환 근처에서 시작합니다.</div></div>
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag three">3D</span><span class="sim-tag data">REAL DATA</span><h3>잔기 기체가 단백질로 모이는 과정 (개념 애니메이션)</h3></div>
+      <div class="sim-view"><canvas id="gasCv"></canvas><span class="hint">드래그 회전 · 휠 확대</span></div>
+      <div class="sim-controls">
+        <label class="ctrl"><span>진행 (재활용 · 층) <output></output></span><input type="range" id="gasT" min="0" max="32" step="0.05" value="12"></label>
+        <label class="ctrl"><span>대상 단백질</span><select id="gasProt"><option value="P00698">리소자임 C (147)</option><option value="P69905">헤모글로빈 α (142)</option></select></label>
+        <div class="ctrl-row"><button class="btn primary" id="gasPlay">▶ 재생</button><label class="check"><input type="checkbox" id="gasFrames" checked> 프레임(삼각형) 표시</label><label class="check"><input type="checkbox" id="gasRelax"> Amber 이완 적용</label></div>
+      </div>
+      <div class="sim-readout">
+        <div class="stat"><span class="k">단계</span><span class="v" id="gasStage">—</span></div>
+        <div class="stat"><span class="k">Cα RMSD (정답 대비)</span><span class="v" id="gasRmsd">—</span></div>
+        <div class="stat"><span class="k">사슬 끊김 (|Cα–Cα| ≠ 3.8±0.3 Å)</span><span class="v" id="gasBreak">—</span></div>
+      </div>
+      <div class="sim-note">⚠ 실제 AlphaFold2 중간 출력이 아닌 <b>개념적 재현</b>입니다: 최종 구조는 AlphaFold DB 예측 좌표, 중간 단계는 “원점에서 시작 → 대략적 폴드 → 국소 정제”를 보간과 잡음으로 흉내 냈습니다. 4번의 재활용(recycling) × 8개 층 = 32단계. 실제 블록별 궤적은 논문 Fig. 4b와 Supplementary Video 1–4를 참고하세요.</div>
+    </div>
+    <p class="tryit"><b>해볼 것:</b> ① 0단계: 모든 잔기가 원점에 겹쳐 있습니다(black hole). ② 초반 층에서 사슬이 끊긴 채(빨간 결합) 대략적 모양이 먼저 나타나는 것을 보세요. ③ 끝에서 “Amber 이완”을 켜면 남은 끊김이 사라집니다 — 논문에 따르면 이완은 GDT·lDDT를 높이지 않고 입체화학 위반만 없앱니다.</p>
+  </section>
+
+  <section>
+    <h2><span class="h-num">5.5</span>곁사슬: 비틀림각으로 원자 복원</h2>
+    <p>Structure Module 마지막에 작은 ResNet이 잔기마다 최대 7개의 비틀림각을 \((\sin\theta,\cos\theta)\) 쌍으로 예측합니다. 각 원자 그룹은 이상적인 결합 기하(교과서 값)를 가진 <b>강체 그룹</b>이므로, 각도만 알면 백본 프레임에 이어 붙여 모든 중원자 좌표를 만들 수 있습니다.</p>
+    <div class="table-wrap"><table>
+      <tr><th>비틀림각</th><th>회전축</th><th>움직이는 원자 그룹</th></tr>
+      <tr><td>ω</td><td>C<sub>i−1</sub>–N<sub>i</sub></td><td>(펩타이드 평면; 거의 180°)</td></tr>
+      <tr><td>φ</td><td>N–Cα</td><td>백본 H</td></tr>
+      <tr><td>ψ</td><td>Cα–C</td><td>카보닐 O</td></tr>
+      <tr><td>χ<sub>1</sub>–χ<sub>4</sub></td><td>Cα–Cβ, Cβ–Cγ, …</td><td>곁사슬 원자들 (아미노산 종류에 따라 0–4개)</td></tr>
+    </table></div>
+    <div class="callout tip"><strong>정규화 트릭</strong>
+      <p>각도를 직접 회귀하면 −180°와 180°가 같은 값이라는 주기성 문제가 생깁니다. 2차원 벡터 \((\sin,\cos)\)를 예측하고 단위 원으로 정규화(+ 길이 보조 손실)하면 이 문제가 사라집니다. 대칭인 곁사슬(예: Asp, Phe의 180° 대칭)은 손실에서 두 대체 정답 중 가까운 쪽을 택합니다.</p></div>
+    <pre><code><span class="c"># Structure module (Supplementary Algorithm 20, 단순화)</span>
+s = Linear(LayerNorm(single)); z = LayerNorm(pair)
+T = [identity frame] * N_res                  <span class="c"># black hole init</span>
+<span class="k">for</span> l <span class="k">in</span> range(8):                          <span class="c"># 같은 가중치 공유</span>
+    s += InvariantPointAttention(s, z, T)
+    s = Transition(s)
+    T = T ∘ BackboneUpdate(s)                 <span class="c"># 국소 프레임 기준 갱신</span>
+    loss += FAPE(T, T_true) / 8               <span class="c"># 중간층 보조 손실</span>
+    <span class="k">if</span> l &lt; 7: T = stop_gradient(T.rotations)  <span class="c"># 회전 경로 기울기 차단</span>
+angles = AngleResNet(s)
+atoms = place_rigid_groups(T, angles)        <span class="c"># 모든 중원자 좌표</span></code></pre>
+  </section>
+
+  <section class="keypoints">
+    <h2>핵심 정리</h2>
+    <ol>
+      <li>각 잔기는 N–Cα–C로 정의된 강체 프레임 \(T_i=(R_i,\mathbf{t}_i)\)이며, 프레임들은 서로 연결되지 않은 “잔기 기체”다.</li>
+      <li>모든 프레임은 원점·항등 회전에서 시작해 가중치를 공유하는 8개 층에서 반복 정제된다.</li>
+      <li>IPA는 국소 프레임의 3D 점 거리를 어텐션에 넣어 전역 회전·이동에 불변이다.</li>
+      <li>백본 업데이트는 국소 프레임 기준이라 등변이다. 사슬 끊김은 위반 손실과 Amber 이완으로 처리한다.</li>
+      <li>곁사슬은 (sin, cos) 비틀림각 + 이상적 강체 그룹으로 복원된다.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>확인 퀴즈</h2>
+    <div class="quiz">
+      <div class="quiz-q" data-answer="2"><p>Q1. 잔기 기체 표현에서 펩타이드 결합 제약을 의도적으로 풀어 둔 이유는?</p><div class="opts">
+        <button class="opt">메모리를 아끼기 위해</button><button class="opt">곁사슬을 예측하지 않기 위해</button><button class="opt">고리 닫힘 문제 없이 모든 부분을 동시에 국소 정제하기 위해</button><button class="opt">Amber 이완을 생략하기 위해</button></div>
+        <p class="quiz-exp">“breaking this constraint enables the local refinement of all parts of the chain without solving complex loop closure problems.”</p></div>
+      <div class="quiz-q" data-answer="0"><p>Q2. IPA의 3D 점 항이 전역 회전에 불변인 근본 이유는?</p><div class="opts">
+        <button class="opt">점 사이 거리는 강체 변환으로 바뀌지 않기 때문</button><button class="opt">점들이 항상 원점에 있기 때문</button><button class="opt">softmax가 회전 불변이기 때문</button><button class="opt">쌍 편향이 회전을 상쇄하기 때문</button></div>
+        <p class="quiz-exp">국소 점을 각 프레임으로 전역 좌표화한 뒤 차이의 노름을 쓰므로, 공통 전역 변환은 상쇄됩니다.</p></div>
+      <div class="quiz-q" data-answer="3"><p>Q3. Structure Module 8개 층의 특징으로 옳은 것은?</p><div class="opts">
+        <button class="opt">층마다 다른 가중치를 쓴다</button><button class="opt">마지막 층에만 손실을 건다</button><button class="opt">프레임은 실험 구조에서 초기화한다</button><button class="opt">가중치를 공유하며 매 층 출력에 FAPE 보조 손실을 건다</button></div>
+        <p class="quiz-exp">반복 정제 개념을 강화하기 위해 같은 층을 8번 적용하고 중간 구조에도 손실을 겁니다.</p></div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

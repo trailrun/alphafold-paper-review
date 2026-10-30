@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>01 단백질 접힘 문제 · FoldBook</title>
+<link rel="stylesheet" href="../css/style.css">
+<link rel="icon" href="../favicon.svg">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+<script src="../js/common.js" defer></script>
+<script src="../js/ch1.js" defer></script>
+</head>
+<body>
+<main class="chapter">
+  <header class="chapter-hero">
+    <div class="eyebrow">Chapter 01</div>
+    <h1>단백질 접힘 문제</h1>
+    <p class="lead">20종의 아미노산이 한 줄로 이어진 사슬이, 어떻게 매번 똑같은 3차원 모양으로 접힐까? 50년 넘게 풀리지 않던 이 질문의 “예측” 부분이 AlphaFold2 논문의 출발점입니다.</p>
+    <ul class="objectives">
+      <li>아미노산 서열(1차 구조)과 3차원 구조의 관계를 설명할 수 있다.</li>
+      <li>안핀센의 도그마와 레빈탈 역설이 무엇을 의미하는지 이해한다.</li>
+      <li>백본 이면각 φ, ψ가 국소 구조(α-나선, β-가닥)를 결정하는 방식을 직접 실험한다.</li>
+      <li>물리 기반 접근과 진화 기반 접근의 차이를 비교할 수 있다.</li>
+    </ul>
+    <p class="paper-ref">관련 원문: <b>Main</b> 첫 두 문단 · Introduction</p>
+  </header>
+
+  <section>
+    <h2><span class="h-num">1.1</span>단백질: 서열이 곧 설계도</h2>
+    <p>단백질은 <span class="term">아미노산</span><span class="en">(amino acid)</span>이 <span class="term">펩타이드 결합</span>으로 이어진 사슬입니다. 모든 아미노산은 같은 뼈대(N–Cα–C, 이를 <b>백본</b>이라 부릅니다)를 공유하고, Cα에 붙은 <b>곁사슬</b><span class="en">(side chain)</span>만 20가지로 다릅니다. 곁사슬이 물을 좋아하는지(친수성) 싫어하는지(소수성), 전하를 띠는지에 따라 사슬이 접히는 방식이 결정됩니다.</p>
+    <figure class="diagram">
+      <svg viewBox="0 0 860 210" role="img" aria-label="단백질 구조의 4단계">
+        <defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="var(--text-dim)"/></marker></defs>
+        <rect x="10" y="20" width="190" height="150" rx="12" class="f-elev"/>
+        <text x="105" y="46" text-anchor="middle" class="t-b">1차 구조</text>
+        <g font-family="var(--mono)" font-size="13">
+          <rect x="28" y="70" width="22" height="22" rx="5" class="f-warn-soft"/><text x="39" y="86" text-anchor="middle" class="t">M</text>
+          <rect x="54" y="70" width="22" height="22" rx="5" class="f-ok-soft"/><text x="65" y="86" text-anchor="middle" class="t">K</text>
+          <rect x="80" y="70" width="22" height="22" rx="5" class="f-warn-soft"/><text x="91" y="86" text-anchor="middle" class="t">V</text>
+          <rect x="106" y="70" width="22" height="22" rx="5" class="f-acc-soft"/><text x="117" y="86" text-anchor="middle" class="t">L</text>
+          <rect x="132" y="70" width="22" height="22" rx="5" class="f-ok-soft"/><text x="143" y="86" text-anchor="middle" class="t">S</text>
+          <rect x="158" y="70" width="22" height="22" rx="5" class="f-acc2-soft"/><text x="169" y="86" text-anchor="middle" class="t">E</text>
+        </g>
+        <text x="105" y="125" text-anchor="middle" class="t-dim">아미노산의 순서</text>
+        <text x="105" y="145" text-anchor="middle" class="t-mono">DNA가 직접 지정</text>
+        <rect x="230" y="20" width="190" height="150" rx="12" class="f-elev"/>
+        <text x="325" y="46" text-anchor="middle" class="t-b">2차 구조</text>
+        <path d="M255 110 q10 -40 20 0 q10 40 20 0 q10 -40 20 0 q10 40 20 0" class="s-acc"/>
+        <path d="M345 85 h50 l-8 -6 M345 100 h50 M345 115 h50 l-8 6" class="s-acc2"/>
+        <text x="290" y="150" text-anchor="middle" class="t-dim">α-나선</text>
+        <text x="370" y="150" text-anchor="middle" class="t-dim">β-시트</text>
+        <rect x="450" y="20" width="190" height="150" rx="12" class="f-elev"/>
+        <text x="545" y="46" text-anchor="middle" class="t-b">3차 구조</text>
+        <path d="M490 130 C470 60, 560 60, 540 110 S600 150, 610 80 S520 70, 560 130" class="s-acc" stroke-width="3"/>
+        <text x="545" y="155" text-anchor="middle" class="t-dim">사슬 하나의 3D 접힘</text>
+        <rect x="670" y="20" width="180" height="150" rx="12" class="f-elev"/>
+        <text x="760" y="46" text-anchor="middle" class="t-b">4차 구조</text>
+        <circle cx="735" cy="95" r="26" class="f-acc-soft"/><circle cx="785" cy="95" r="26" class="f-acc2-soft"/>
+        <circle cx="760" cy="125" r="22" class="f-ok-soft"/>
+        <text x="760" y="160" text-anchor="middle" class="t-dim">여러 사슬의 복합체</text>
+        <path d="M200 95 h28" class="s-line" marker-end="url(#a1)"/><path d="M420 95 h28" class="s-line" marker-end="url(#a1)"/><path d="M640 95 h28" class="s-line" marker-end="url(#a1)"/>
+        <text x="430" y="200" text-anchor="middle" class="t-acc">AlphaFold2의 과제: 1차 구조만 보고 3차 구조(모든 중원자 좌표)를 예측</text>
+      </svg>
+      <figcaption><b>그림 1-1.</b> 단백질 구조의 네 단계. AlphaFold2(2021)는 단일 사슬의 3차 구조 예측을 목표로 하며, 복합체(4차 구조)는 후속 AlphaFold-Multimer·AlphaFold3에서 다룹니다.</figcaption>
+    </figure>
+
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag">SIMULATOR</span><h3>아미노산 20종 탐색기</h3></div>
+      <div class="aa-grid" id="aaGrid"></div>
+      <div class="sim-note" id="aaInfo">아미노산을 눌러 보세요.</div>
+    </div>
+    <p class="tryit"><b>해볼 것:</b> ① 소수성(주황) 아미노산이 몇 개인지 세어 보세요. ② 글라이신(G)과 프롤린(P)이 왜 “특수” 분류인지 설명을 읽어 보세요 — 3.3절의 φ/ψ 실험과 연결됩니다.</p>
+  </section>
+
+  <section>
+    <h2><span class="h-num">1.2</span>안핀센의 도그마와 레빈탈 역설</h2>
+    <p>1960년대 <b>Christian Anfinsen</b>은 리보뉴클레이스를 풀었다가(변성) 다시 접히게(재접힘) 하는 실험으로, <b>단백질의 고유 구조는 아미노산 서열에 의해 결정된다</b>는 것을 보였습니다(1972 노벨 화학상). 이것이 “서열 → 구조 예측”이 원리적으로 가능하다는 근거입니다. 논문은 이 문제를 이렇게 소개합니다.</p>
+    <div class="callout paper"><strong>Introduction</strong>
+      <blockquote>“Predicting the three-dimensional structure that a protein will adopt based solely on its amino acid sequence — the structure prediction component of the ‘protein folding problem’ — has been an important open research problem for more than 50 years.”</blockquote>
+    </div>
+    <p>그런데 1969년 <b>Cyrus Levinthal</b>은 사고실험을 제시했습니다. 잔기마다 가능한 형태가 몇 개만 있어도 전체 경우의 수는 지수적으로 폭발하므로, 무작위 탐색으로는 우주의 나이 동안에도 정답을 찾지 못한다는 것이죠. 그런데 실제 단백질은 밀리초~초 만에 접힙니다.</p>
+    <div class="formula">$$T_{\text{search}} = k^{N}\cdot \tau$$
+      <div class="where">\(N\): 잔기 수, \(k\): 잔기당 가능한 형태 수, \(\tau\): 한 형태를 시험하는 시간(대략 결합 진동 주기 ~\(10^{-13}\) s)</div></div>
+
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag">SIMULATOR</span><h3>레빈탈 역설 계산기</h3></div>
+      <div class="sim-view"><canvas id="levCv"></canvas></div>
+      <div class="sim-controls">
+        <label class="ctrl"><span>잔기 수 N <output></output></span><input type="range" id="levN" min="10" max="400" value="100"></label>
+        <label class="ctrl"><span>잔기당 형태 수 k <output></output></span><input type="range" id="levK" min="2" max="10" value="3"></label>
+        <label class="ctrl"><span>시도당 시간 τ <output></output></span><input type="range" id="levT" min="-15" max="-9" value="-13"></label>
+      </div>
+      <div class="sim-readout">
+        <div class="stat"><span class="k">경우의 수</span><span class="v" id="levConf">—</span></div>
+        <div class="stat"><span class="k">전수 탐색 시간</span><span class="v" id="levTime">—</span></div>
+        <div class="stat"><span class="k">우주 나이 대비</span><span class="v" id="levUni">—</span></div>
+      </div>
+      <div class="sim-note">로그 스케일 막대: 실제 단백질 접힘 시간(μs~s), 우주 나이(4.4×10<sup>17</sup> s)와 비교합니다.</div>
+    </div>
+    <p class="tryit"><b>해볼 것:</b> ① N = 100, k = 3일 때 우주 나이의 몇 배인지 확인하세요. ② k = 2로 줄여도 N이 150을 넘으면 어떻게 되나요? ③ 결론: 자연은 무작위 탐색을 하지 않는다 — 에너지 지형(funnel)을 따라 내려갑니다.</p>
+  </section>
+
+  <section>
+    <h2><span class="h-num">1.3</span>백본의 자유도: 이면각 φ와 ψ</h2>
+    <p>펩타이드 결합(C–N)은 부분적 이중결합이라 거의 평면(ω ≈ 180°)입니다. 따라서 백본의 실질적 자유도는 잔기마다 두 개의 회전각, <span class="term">φ</span>(N–Cα 결합 주위)와 <span class="term">ψ</span>(Cα–C 결합 주위)뿐입니다. 이 두 각이 정해지면 백본 모양이 전부 결정됩니다. 입체 충돌 때문에 허용되는 (φ, ψ) 조합은 제한적인데, 이를 그린 것이 <b>라마찬드란 플롯</b>입니다.</p>
+    <p>AlphaFold2의 Structure Module이 곁사슬을 표현할 때 쓰는 것도 바로 이런 <b>비틀림각</b>(torsion angle)입니다: 백본의 ω, φ, ψ와 곁사슬의 χ<sub>1</sub>–χ<sub>4</sub>까지 잔기당 최대 7개(5장).</p>
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag three">3D</span><h3>φ/ψ 백본 빌더 + 라마찬드란 플롯</h3></div>
+      <div class="sim-body side">
+        <div>
+          <div class="sim-view"><canvas id="bbCv"></canvas><span class="hint">드래그 회전 · 휠 확대</span></div>
+          <div class="sim-view" style="border-top:1px solid var(--border)"><canvas id="ramaCv"></canvas><span class="hint">플롯을 클릭해 (φ, ψ) 선택</span></div>
+        </div>
+        <div class="sim-controls">
+          <label class="ctrl"><span>φ (phi) <output></output></span><input type="range" id="bbPhi" min="-180" max="180" value="-57"></label>
+          <label class="ctrl"><span>ψ (psi) <output></output></span><input type="range" id="bbPsi" min="-180" max="180" value="-47"></label>
+          <label class="ctrl"><span>잔기 수 <output></output></span><input type="range" id="bbN" min="4" max="40" value="18"></label>
+          <div class="ctrl"><span>프리셋</span>
+            <div class="seg" id="bbPreset"><button data-v="-57,-47" class="on">α-나선</button><button data-v="-119,113">β-가닥</button><button data-v="-75,145">PPII</button><button data-v="57,47">좌선 α</button></div></div>
+          <label class="check"><input type="checkbox" id="bbAtoms" checked> N/Cα/C 원자 표시</label>
+        </div>
+      </div>
+      <div class="sim-readout">
+        <div class="stat"><span class="k">잔기당 상승</span><span class="v" id="bbRise">—</span></div>
+        <div class="stat"><span class="k">회전당 잔기</span><span class="v" id="bbPer">—</span></div>
+        <div class="stat"><span class="k">말단 간 거리</span><span class="v" id="bbEnd">—</span></div>
+        <div class="stat"><span class="k">판정</span><span class="v" id="bbZone">—</span></div>
+      </div>
+      <div class="sim-note">모든 잔기에 같은 (φ, ψ)를 주고 NeRF 알고리즘(결합 길이·각도 고정)으로 백본 좌표를 생성합니다. 라마찬드란 영역은 대표적 허용 영역의 근사입니다. 색: <span style="color:#3b82f6">N</span>, <span style="color:#9aa6bf">Cα</span>, <span style="color:#ef4444">C</span>.</div>
+    </div>
+    <p class="tryit"><b>해볼 것:</b> ① α-나선 프리셋에서 “회전당 잔기”가 약 3.6, 잔기당 상승이 약 1.5 Å인지 확인. ② φ를 −57°에서 −119°로 천천히 바꾸며 나선이 펴지는 과정을 관찰. ③ (φ, ψ) = (60°, −120°)처럼 허용 영역 밖을 찍어 보세요 — 실제 단백질에선 거의 나오지 않는 조합(글라이신 예외)입니다.</p>
+  </section>
+
+  <section>
+    <h2><span class="h-num">1.4</span>접힘의 물리: 소수성 붕괴 장난감 모델</h2>
+    <p>물리 기반 접근은 “에너지가 가장 낮은 구조가 고유 구조”라는 가정 아래 에너지를 최소화합니다. 가장 단순한 장난감이 <b>HP 격자 모델</b>(Dill, 1985)입니다. 아미노산을 소수성(H)과 극성(P) 두 종류로만 나누고, 2D 격자 위에서 사슬이 겹치지 않게 놓은 뒤, 서로 이웃한(사슬로 직접 연결되지 않은) H–H 쌍마다 에너지 −1을 줍니다.</p>
+    <div class="formula">$$E = -\sum_{i<j-1} [\,h_i = h_j = \text{H}\,]\cdot[\,|\mathbf{r}_i-\mathbf{r}_j| = 1\,]$$</div>
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag">SIMULATOR</span><h3>HP 격자 모델 몬테카를로 접힘</h3></div>
+      <div class="sim-body side">
+        <div>
+          <div class="sim-view"><canvas id="hpCv"></canvas></div>
+          <div class="sim-view" style="border-top:1px solid var(--border)"><canvas id="hpE"></canvas></div>
+        </div>
+        <div class="sim-controls">
+          <label class="ctrl"><span>서열 (H/P)</span><input type="text" id="hpSeq" value="HPHPPHHPHPPHPHHPPHPH"></label>
+          <label class="ctrl"><span>온도 T <output></output></span><input type="range" id="hpT" min="0.05" max="2" step="0.05" value="0.6"></label>
+          <div class="ctrl-row"><button class="btn primary" id="hpRun">▶ 실행</button><button class="btn" id="hpAnneal">담금질</button><button class="btn" id="hpReset">초기화</button></div>
+          <div class="ctrl"><span>프리셋</span>
+            <div class="seg" id="hpPreset"><button data-v="HPHPPHHPHPPHPHHPPHPH" class="on">20-mer</button><button data-v="HHPPHPPHPPHPPHPPHPPHPPHH">24-mer</button><button data-v="PPHPPHHPPPPHHPPPPHHPPPPHH">25-mer</button></div></div>
+        </div>
+      </div>
+      <div class="sim-readout">
+        <div class="stat"><span class="k">현재 에너지</span><span class="v" id="hpCur">—</span></div>
+        <div class="stat"><span class="k">최저 에너지</span><span class="v" id="hpBest">—</span></div>
+        <div class="stat"><span class="k">시도 횟수</span><span class="v" id="hpSteps">—</span></div>
+        <div class="stat"><span class="k">수락률</span><span class="v" id="hpAcc">—</span></div>
+      </div>
+      <div class="sim-note">이동: 끝단 이동 · 모서리 뒤집기 · 피벗(꼬리 회전). 메트로폴리스 기준 \(p=\min(1, e^{-\Delta E/T})\)로 수락. 20-mer의 알려진 최저 에너지는 −9입니다. 주황 = H(소수성), 파랑 = P(극성), 점선 = H–H 접촉.</div>
+    </div>
+    <p class="tryit"><b>해볼 것:</b> ① T = 2.0(고온)에서는 사슬이 풀린 채로 요동합니다. ② “담금질”(온도를 서서히 낮춤)을 눌러 H가 안쪽으로 모이는 <b>소수성 코어</b>를 관찰하세요. ③ 같은 서열도 실행마다 다른 국소 최저점에 갇히곤 합니다 — 물리 기반 탐색이 왜 어려운지 체감할 수 있습니다.</p>
+  </section>
+
+  <section>
+    <h2><span class="h-num">1.5</span>구조–서열 격차</h2>
+    <p>X선 결정학, NMR, 극저온 전자현미경(cryo-EM)으로 지금까지 약 <b>10만 종</b>의 고유 단백질 구조가 밝혀졌습니다. 하나를 푸는 데 수개월~수년이 걸립니다. 반면 유전체 시퀀싱이 쏟아낸 단백질 서열은 <b>수십억</b> 개입니다. 논문이 만든 서열 DB인 BFD 하나만 22억 개 서열을 담고 있습니다.</p>
+    <div class="sim">
+      <div class="sim-head"><span class="sim-tag data">REAL NUMBERS</span><h3>구조 vs 서열: 로그 스케일로 보기</h3></div>
+      <div class="sim-view"><canvas id="gapCv"></canvas></div>
+      <div class="sim-note">출처: 논문 본문(고유 구조 ~10만, BFD 2,204,359,010 서열, 자기증류용 Uniclust 355,993 서열), AlphaFold DB(2억 개 이상 예측 구조, 2022). 막대를 눌러 설명을 보세요. <span id="gapInfo"></span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="h-num">1.6</span>두 갈래의 길: 물리 vs 진화</h2>
+    <p>논문 Main 첫 문단은 구조 예측 연구가 두 갈래로 발전해 왔다고 정리합니다.</p>
+    <div class="table-wrap"><table>
+      <tr><th></th><th>물리적 상호작용 프로그램</th><th>진화 역사 프로그램</th></tr>
+      <tr><td><b>핵심 아이디어</b></td><td>분자 힘(열역학·동역학)을 시뮬레이션하거나 통계적으로 근사</td><td>상동 구조(템플릿) + 서열 간 쌍별 공진화 신호</td></tr>
+      <tr><td><b>장점</b></td><td>이론적으로 매력적, 데이터 불필요</td><td>PDB·유전체 데이터 폭증, 딥러닝과 결합 용이</td></tr>
+      <tr><td><b>한계</b></td><td>계산 불가능할 만큼 비쌈, 충분히 정확한 물리 모델 부재</td><td>가까운 상동체가 없으면 실험 정확도에 크게 못 미침</td></tr>
+      <tr><td><b>AlphaFold2</b></td><td colspan="2">진화 정보(MSA)를 입력으로 쓰되, <b>물리·기하학적 귀납 편향</b>(삼각형 일관성, 강체 프레임, 회전 불변성)을 신경망 구조 자체에 심은 하이브리드</td></tr>
+    </table></div>
+    <div class="callout"><strong>왜 이것이 “문제의 해결”로 불렸나?</strong>
+      <p>AlphaFold2 이전에도 딥러닝(AlphaFold1, trRosetta 등)은 잔기 간 거리 분포를 예측해 구조를 “조립”했습니다. AlphaFold2는 <b>좌표를 끝까지(end-to-end) 직접 출력</b>하고, 상동 구조가 없는 경우에도 <b>원자 수준 정확도</b>(탄소 원자 지름 ~1.4 Å보다 작은 오차)를 보인 첫 방법이었습니다.</p></div>
+  </section>
+
+  <section class="keypoints">
+    <h2>핵심 정리</h2>
+    <ol>
+      <li>단백질 구조는 아미노산 서열이 결정한다(안핀센). 따라서 서열 → 구조 예측은 원리적으로 가능하다.</li>
+      <li>가능한 형태의 수는 천문학적이다(레빈탈). 무작위 탐색이 아닌, 효율적인 추론이 필요하다.</li>
+      <li>백본 모양은 잔기당 두 이면각 φ, ψ로 결정되며 허용 영역은 제한적이다.</li>
+      <li>물리 기반 에너지 최소화는 국소 최저점과 계산 비용 문제에 부딪힌다.</li>
+      <li>해결된 구조(~10<sup>5</sup>)와 알려진 서열(~10<sup>9</sup>) 사이의 거대한 격차가 계산적 예측의 동기다.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>확인 퀴즈</h2>
+    <div class="quiz">
+      <div class="quiz-q" data-answer="1"><p>Q1. 안핀센 실험이 구조 예측 연구에 주는 의미로 가장 적절한 것은?</p><div class="opts">
+        <button class="opt">단백질은 샤페론 없이는 절대 접히지 않는다</button>
+        <button class="opt">고유 구조의 정보가 아미노산 서열 안에 들어 있다</button>
+        <button class="opt">모든 단백질은 α-나선으로만 이루어진다</button>
+        <button class="opt">접힘 시간은 잔기 수에 지수적으로 비례한다</button></div>
+        <p class="quiz-exp">서열이 구조를 결정한다면, 서열만 보고 구조를 맞히는 함수가 존재한다는 뜻입니다. AlphaFold2는 이 함수를 데이터로부터 학습합니다.</p></div>
+      <div class="quiz-q" data-answer="2"><p>Q2. 백본의 실질적인 회전 자유도가 잔기당 2개(φ, ψ)인 이유는?</p><div class="opts">
+        <button class="opt">Cα가 키랄 중심이기 때문</button>
+        <button class="opt">곁사슬이 백본을 고정하기 때문</button>
+        <button class="opt">펩타이드 결합(ω)이 부분 이중결합이라 평면에 가깝기 때문</button>
+        <button class="opt">수소 결합이 모든 회전을 막기 때문</button></div>
+        <p class="quiz-exp">C–N 펩타이드 결합은 공명으로 부분 이중결합 성격을 가져 ω ≈ 180°(trans)로 거의 고정됩니다.</p></div>
+      <div class="quiz-q" data-answer="0"><p>Q3. HP 모델 시뮬레이터에서 저온 담금질 후 H 잔기들이 모이는 현상이 대응하는 실제 현상은?</p><div class="opts">
+        <button class="opt">소수성 코어 형성</button><button class="opt">이황화 결합 형성</button><button class="opt">펩타이드 결합 가수분해</button><button class="opt">번역 후 인산화</button></div>
+        <p class="quiz-exp">소수성 잔기가 물을 피해 단백질 내부로 모이는 “소수성 붕괴”는 접힘의 주요 원동력입니다.</p></div>
+      <div class="quiz-q" data-answer="3"><p>Q4. AlphaFold2 논문이 자신의 접근을 묘사한 방식으로 옳은 것은?</p><div class="opts">
+        <button class="opt">분자동역학 시뮬레이션을 GPU로 가속했다</button>
+        <button class="opt">템플릿 구조를 복사·편집하는 방법이다</button>
+        <button class="opt">진화 정보를 쓰지 않는 순수 단일 서열 모델이다</button>
+        <button class="opt">MSA를 활용하면서 물리·기하학적 귀납 편향을 딥러닝 구조에 결합했다</button></div>
+        <p class="quiz-exp">Discussion: “we use a physical and geometric inductive bias to build components that learn from PDB data with minimal imposition of handcrafted features.”</p></div>
+    </div>
+  </section>
+</main>
+</body>
+</html>
